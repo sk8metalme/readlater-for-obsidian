@@ -200,16 +200,34 @@ class LanguageDetector {
             return { language: 'ja', confidence: 0.9 };
         }
         
-        // アルファベットベースの言語検出（簡易版）
-        if (/^[a-zA-Z\s.,!?;:"'-]+$/.test(sampleText.slice(0, 100))) {
-            // 英語特有の単語パターン
-            const englishWords = ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'];
-            const wordCount = englishWords.filter(word => 
-                new RegExp(`\\b${word}\\b`, 'i').test(sampleText)
-            ).length;
+        // アルファベットベースの言語検出（改良版）
+        const alphabeticRatio = sampleText.match(/[a-zA-Z]/g)?.length / sampleText.length || 0;
+        
+        if (alphabeticRatio > 0.7) {
+            // 英語特有の単語パターン（より包括的）
+            const englishWords = ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'have', 'has', 'had', 'will', 'would', 'can', 'could', 'this', 'that'];
+            const words = sampleText.toLowerCase().split(/\s+/);
+            const englishWordCount = englishWords.filter(word => words.includes(word)).length;
             
-            if (wordCount > 2) {
-                return { language: 'en', confidence: 0.8 };
+            // 英語らしいパターンの検出
+            const englishPatterns = [
+                /\b(ing|ed|ly|tion|ness|ment|able|ible)\b/g,  // 英語特有の語尾
+                /\b(a|an|the)\s+\w+/g,  // 冠詞パターン
+                /\w+\s+(is|are|was|were)\s+\w+/g  // be動詞パターン
+            ];
+            
+            let patternScore = 0;
+            englishPatterns.forEach(pattern => {
+                const matches = sampleText.match(pattern);
+                if (matches) patternScore += matches.length;
+            });
+            
+            const totalScore = englishWordCount + patternScore;
+            
+            if (totalScore >= 5) {
+                return { language: 'en', confidence: Math.min(0.8 + totalScore * 0.02, 0.95) };
+            } else if (totalScore >= 2) {
+                return { language: 'en', confidence: 0.6 };
             }
             
             // その他のヨーロッパ言語の特殊文字
@@ -217,7 +235,8 @@ class LanguageDetector {
                 return { language: 'unknown', confidence: 0.6 }; // ヨーロッパ言語
             }
             
-            return { language: 'en', confidence: 0.5 }; // デフォルトは英語
+            // アルファベット中心なら英語と推測
+            return { language: 'en', confidence: 0.4 };
         }
         
         // 最も信頼度の高い結果を返す
