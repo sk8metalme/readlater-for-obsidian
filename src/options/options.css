@@ -68,6 +68,92 @@ body {
     border: 1px solid #f5c6cb;
 }
 
+/* Info Box */
+.info-box {
+    background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+    border: 1px solid #bbdefb;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.info-box h4 {
+    color: #1976d2;
+    margin-bottom: 0.75rem;
+    font-size: 1.1rem;
+}
+
+.info-box p {
+    margin-bottom: 0.75rem;
+    color: #424242;
+    line-height: 1.6;
+}
+
+.info-box p:last-child {
+    margin-bottom: 0;
+}
+
+.install-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #1976d2;
+    text-decoration: none;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    background: white;
+    border: 1px solid #bbdefb;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.install-link:hover {
+    background: #e3f2fd;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Status Indicator */
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+}
+
+.status-icon {
+    font-size: 1.25rem;
+    width: 24px;
+    text-align: center;
+}
+
+.status-text {
+    font-weight: 500;
+    color: #495057;
+}
+
+.status-indicator.success {
+    background: #d4edda;
+    border-color: #c3e6cb;
+    color: #155724;
+}
+
+.status-indicator.error {
+    background: #f8d7da;
+    border-color: #f5c6cb;
+    color: #721c24;
+}
+
+.status-indicator.warning {
+    background: #fff3cd;
+    border-color: #ffeaa7;
+    color: #856404;
+}
+
 .status-message.info {
     background-color: #cce7ff;
     color: #004085;

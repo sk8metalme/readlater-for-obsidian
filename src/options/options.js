@@ -7,14 +7,12 @@ console.log('ReadLater for Obsidian: Options page loaded');
 const elements = {
     // 入力フィールド
     obsidianPath: document.getElementById('obsidian-path'),
-    claudeApiKey: document.getElementById('claude-api-key'),
     translationEnabled: document.getElementById('translation-enabled'),
     summaryEnabled: document.getElementById('summary-enabled'),
     targetLanguage: document.getElementById('target-language'),
     fileNaming: document.getElementById('file-naming'),
     
     // ボタン
-    toggleApiKey: document.getElementById('toggle-api-key'),
     testClaudeConnection: document.getElementById('test-claude-connection'),
     testFileSave: document.getElementById('test-file-save'),
     saveSettings: document.getElementById('save-settings'),
@@ -22,13 +20,13 @@ const elements = {
     
     // 結果表示
     statusMessage: document.getElementById('status-message'),
+    claudeStatus: document.getElementById('claude-status'),
     claudeTestResult: document.getElementById('claude-test-result'),
     fileTestResult: document.getElementById('file-test-result')
 };
 
 // デフォルト設定
 const defaultSettings = {
-    claudeApiKey: '',
     obsidianPath: 'ReadLater',
     translationEnabled: true,
     summaryEnabled: true,
@@ -46,6 +44,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // イベントリスナーの設定
     setupEventListeners();
     
+    // Claude CLI状態の確認
+    await checkClaudeCLIStatus();
+    
     // 初期状態の確認
     validateCurrentSettings();
 });
@@ -62,7 +63,6 @@ async function loadSettings() {
         
         // フォームに設定値を反映
         elements.obsidianPath.value = settings.obsidianPath || defaultSettings.obsidianPath;
-        elements.claudeApiKey.value = settings.claudeApiKey || '';
         elements.translationEnabled.checked = settings.translationEnabled !== false;
         elements.summaryEnabled.checked = settings.summaryEnabled !== false;
         elements.targetLanguage.value = settings.targetLanguage || defaultSettings.targetLanguage;
@@ -72,6 +72,41 @@ async function loadSettings() {
         console.error('ReadLater for Obsidian: Error loading settings', error);
         showStatusMessage('設定の読み込みに失敗しました', 'error');
     }
+}
+
+/**
+ * Claude CLI状態の確認
+ */
+async function checkClaudeCLIStatus() {
+    try {
+        // Service WorkerにClaude CLI状態を確認
+        const response = await chrome.runtime.sendMessage({
+            action: 'checkClaudeCLIStatus'
+        });
+        
+        if (response && response.success) {
+            updateClaudeStatus('success', '✅ Claude CLI利用可能', 'Claude CLIが正常にインストールされています');
+        } else {
+            updateClaudeStatus('error', '❌ Claude CLI未インストール', 'Claude CLIをインストールしてください');
+        }
+    } catch (error) {
+        console.error('ReadLater for Obsidian: Failed to check Claude CLI status', error);
+        updateClaudeStatus('warning', '⚠️ 状態不明', 'Claude CLIの状態を確認できませんでした');
+    }
+}
+
+/**
+ * Claude CLI状態表示の更新
+ */
+function updateClaudeStatus(type, icon, text) {
+    const statusIcon = elements.claudeStatus.querySelector('.status-icon');
+    const statusText = elements.claudeStatus.querySelector('.status-text');
+    
+    statusIcon.textContent = icon;
+    statusText.textContent = text;
+    
+    // クラスの更新
+    elements.claudeStatus.className = `status-indicator ${type}`;
 }
 
 /**

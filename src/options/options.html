@@ -43,22 +43,24 @@
                 <h2>🤖 Claude CLI設定</h2>
                 
                 <div class="setting-group">
-                    <label for="claude-api-key" class="setting-label">
-                        🔑 Claude API キー
-                        <span class="required">*</span>
-                    </label>
-                    <div class="input-group">
-                        <input 
-                            type="password" 
-                            id="claude-api-key" 
-                            class="setting-input" 
-                            placeholder="sk-..."
-                        >
-                        <button type="button" id="toggle-api-key" class="toggle-btn">👁️</button>
+                    <div class="info-box">
+                        <h4>📋 Claude CLIについて</h4>
+                        <p>ReadLater for Obsidianは、ローカルにインストールされたClaude CLIを使用します。APIキーは不要です。</p>
+                        <p><strong>必要な作業:</strong> Claude CLIをローカルにインストールしてください。</p>
+                        <a href="https://docs.anthropic.com/ja/docs/claude-code/cli-reference" target="_blank" rel="noopener" class="install-link">
+                            📥 Claude CLIインストールガイド
+                        </a>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <label class="setting-label">🔍 Claude CLI状態</label>
+                    <div id="claude-status" class="status-indicator">
+                        <span class="status-icon">⏳</span>
+                        <span class="status-text">確認中...</span>
                     </div>
                     <div class="setting-help">
-                        翻訳・要約機能に必要なClaude APIキーを入力してください。
-                        <a href="https://console.anthropic.com/" target="_blank" rel="noopener">取得はこちら</a>
+                        Claude CLIの利用可能性を自動的に検出します
                     </div>
                 </div>
 
@@ -125,7 +127,7 @@
                 
                 <div class="test-group">
                     <button id="test-claude-connection" class="test-btn">
-                        🤖 Claude CLI接続テスト
+                        🤖 Claude CLI動作テスト
                     </button>
                     <div id="claude-test-result" class="test-result"></div>
                 </div>

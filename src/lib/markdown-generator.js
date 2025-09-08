@@ -110,34 +110,62 @@ class MarkdownGenerator {
         const metadata = articleData.metadata || {};
         const date = new Date().toISOString().split('T')[0];
         
+        const now = new Date();
+        const time = now.toTimeString().split(' ')[0];
+        
         const frontmatter = {
+            // 基本情報
             title: this.escapeYamlString(articleData.translatedTitle || articleData.title),
             originalTitle: articleData.translatedTitle ? this.escapeYamlString(articleData.title) : undefined,
             url: articleData.url,
             domain: articleData.domain,
+            
+            // 日時情報（Obsidian連携用）
             date: date,
-            tags: ['ReadLater'],
+            time: time,
+            created: now.toISOString(),
+            
+            // タグ（Obsidian用）
+            tags: ['ReadLater', 'article'],
+            type: 'article',
+            source: 'web',
+            
+            // 記事メタデータ
             author: metadata.author || 'Unknown',
             readingTime: metadata.readingTime || 'Unknown',
             language: metadata.language || 'unknown',
             detectedLanguage: articleData.detectedLanguage || 'unknown',
             extractedAt: articleData.extractedAt,
-            strategy: articleData.strategy || 'unknown'
+            strategy: articleData.strategy || 'unknown',
+            
+            // Obsidian用の追加フィールド
+            aliases: generateAliases(articleData),
+            cssclass: 'readlater-article',
+            publish: false
         };
         
         // Claude AI処理情報
         if (articleData.translatedContent) {
             frontmatter.translated = !articleData.translationSkipped;
             frontmatter.translationSource = articleData.detectedLanguage;
+            frontmatter.translationDate = date;
         }
         
         if (articleData.summary) {
             frontmatter.aiSummary = !articleData.summarySkipped;
             frontmatter.summaryWordCount = articleData.summaryWordCount;
+            frontmatter.summaryDate = date;
         }
         
         if (articleData.keywords && articleData.keywords.length > 0) {
             frontmatter.aiKeywords = articleData.keywords;
+            frontmatter.tags = [...frontmatter.tags, ...articleData.keywords.slice(0, 3)]; // 上位3つをタグに追加
+        }
+        
+        // ファイルサイズ情報
+        if (articleData.content) {
+            frontmatter.wordCount = articleData.content.split(/\s+/).length;
+            frontmatter.charCount = articleData.content.length;
         }
         
         // オプションでメタデータを追加
@@ -529,6 +557,33 @@ class HTMLToMarkdownConverter {
     convertLineBreak(element) {
         return '\n';
     }
+}
+
+/**
+ * エイリアス生成（Obsidian用）
+ * @param {Object} articleData - 記事データ
+ * @returns {Array<string>} エイリアス配列
+ */
+function generateAliases(articleData) {
+    const aliases = [];
+    
+    // 元のタイトルをエイリアスに追加
+    if (articleData.title && articleData.title !== articleData.translatedTitle) {
+        aliases.push(articleData.title);
+    }
+    
+    // ドメイン名をエイリアスに追加
+    if (articleData.domain) {
+        aliases.push(articleData.domain);
+    }
+    
+    // 短縮タイトルをエイリアスに追加
+    const shortTitle = (articleData.translatedTitle || articleData.title || '').substring(0, 30);
+    if (shortTitle && shortTitle !== articleData.translatedTitle) {
+        aliases.push(shortTitle);
+    }
+    
+    return aliases;
 }
 
 // モジュールのエクスポート
