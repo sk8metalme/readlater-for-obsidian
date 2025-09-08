@@ -1,6 +1,18 @@
 // ReadLater for Obsidian - Service Worker
 // Chrome拡張機能のバックグラウンド処理を管理
 
+// 必要なライブラリをインポート
+try {
+    importScripts(
+        'src/lib/claude-api.js',
+        'src/lib/markdown-generator.js',
+        'src/utils/error-handler.js'
+    );
+    console.log('ReadLater for Obsidian: Libraries imported successfully');
+} catch (error) {
+    console.warn('ReadLater for Obsidian: Failed to import some libraries', error);
+}
+
 console.log('ReadLater for Obsidian: Service Worker initialized');
 
 // 拡張機能インストール時の初期化
@@ -144,9 +156,16 @@ async function processExtractedArticle(articleData, settings) {
             markdown = generateBasicMarkdown(articleData);
         }
         
-        // TODO: Sprint 3で実装予定
-        // 1. Claude CLI による翻訳処理
-        // 2. Claude CLI による要約処理
+        // Claude CLI連携による翻訳・要約処理
+        if (settings.translationEnabled || settings.summaryEnabled) {
+            try {
+                console.log('ReadLater for Obsidian: Starting Claude CLI processing');
+                articleData = await processWithClaude(articleData, settings);
+            } catch (error) {
+                console.warn('ReadLater for Obsidian: Claude processing failed, continuing without AI features', error);
+                showNotification('AI処理警告', 'AI機能の処理に失敗しました。記事は保存されます。', 'warning');
+            }
+        }
         
         // ファイル保存（Downloads APIを使用）
         await saveMarkdownFile(markdown, articleData.title, settings);
@@ -261,6 +280,130 @@ async function getSettings() {
 function validateSettings(settings) {
     // 現在は基本チェックのみ（Sprint 3でClaude CLI関連の検証を追加予定）
     return settings && typeof settings === 'object';
+}
+
+/**
+ * Claude CLI連携による翻訳・要約処理
+ * @param {Object} articleData - 記事データ
+ * @param {Object} settings - ユーザー設定
+ * @returns {Promise<Object>} 処理済み記事データ
+ */
+async function processWithClaude(articleData, settings) {
+    try {
+        if (!settings.claudeApiKey) {
+            throw new Error('Claude API key not configured');
+        }
+        
+        // Claude APIライブラリの初期化
+        let claudeAPI, languageDetector, translationService, summaryService;
+        
+        try {
+            if (typeof ClaudeAPI !== 'undefined') {
+                claudeAPI = new ClaudeAPI(settings.claudeApiKey);
+                languageDetector = new LanguageDetector();
+                translationService = new TranslationService(claudeAPI);
+                summaryService = new SummaryService(claudeAPI);
+                console.log('ReadLater for Obsidian: Claude API services initialized');
+            } else {
+                throw new Error('Claude API library not available');
+            }
+        } catch (error) {
+            console.error('ReadLater for Obsidian: Failed to initialize Claude services', error);
+            throw error;
+        }
+        
+        const result = { ...articleData };
+        
+        // 言語検出
+        console.log('ReadLater for Obsidian: Detecting content language');
+        const languageResult = await languageDetector.detectLanguage(articleData.content);
+        result.detectedLanguage = languageResult.language;
+        result.languageConfidence = languageResult.confidence;
+        
+        console.log('ReadLater for Obsidian: Detected language', languageResult);
+        
+        // 翻訳処理
+        if (settings.translationEnabled && languageResult.language !== 'ja') {
+            console.log('ReadLater for Obsidian: Starting translation');
+            
+            try {
+                // タイトルの翻訳
+                const titleTranslation = await translationService.translateText(
+                    articleData.title,
+                    languageResult.language,
+                    settings.targetLanguage || 'ja',
+                    { isTitle: true }
+                );
+                
+                // 本文の翻訳
+                const contentTranslation = await translationService.translateText(
+                    articleData.content,
+                    languageResult.language,
+                    settings.targetLanguage || 'ja',
+                    { preserveMarkdown: true }
+                );
+                
+                result.translatedTitle = titleTranslation.translatedText;
+                result.translatedContent = contentTranslation.translatedText;
+                result.translationSkipped = titleTranslation.skipped && contentTranslation.skipped;
+                
+                console.log('ReadLater for Obsidian: Translation completed', {
+                    titleTranslated: !titleTranslation.skipped,
+                    contentTranslated: !contentTranslation.skipped
+                });
+                
+            } catch (error) {
+                console.error('ReadLater for Obsidian: Translation failed', error);
+                result.translationError = error.message;
+            }
+        } else {
+            console.log('ReadLater for Obsidian: Translation skipped', {
+                enabled: settings.translationEnabled,
+                language: languageResult.language
+            });
+        }
+        
+        // 要約処理
+        if (settings.summaryEnabled) {
+            console.log('ReadLater for Obsidian: Starting summarization');
+            
+            try {
+                const contentToSummarize = result.translatedContent || articleData.content;
+                
+                const summaryResult = await summaryService.generateSummary(contentToSummarize, {
+                    style: settings.summaryStyle || 'structured',
+                    maxLength: settings.summaryLength || 500
+                });
+                
+                result.summary = summaryResult.summary;
+                result.summarySkipped = summaryResult.skipped;
+                result.summaryWordCount = summaryResult.summaryWordCount;
+                
+                // キーワード抽出も実行
+                if (!summaryResult.skipped) {
+                    const keywordsResult = await summaryService.generateKeywords(contentToSummarize);
+                    result.keywords = keywordsResult.keywords;
+                }
+                
+                console.log('ReadLater for Obsidian: Summarization completed', {
+                    summaryGenerated: !summaryResult.skipped,
+                    keywordsCount: result.keywords?.length || 0
+                });
+                
+            } catch (error) {
+                console.error('ReadLater for Obsidian: Summarization failed', error);
+                result.summaryError = error.message;
+            }
+        } else {
+            console.log('ReadLater for Obsidian: Summarization skipped (disabled)');
+        }
+        
+        return result;
+        
+    } catch (error) {
+        console.error('ReadLater for Obsidian: Claude processing failed', error);
+        throw error;
+    }
 }
 
 /**

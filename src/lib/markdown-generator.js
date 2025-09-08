@@ -111,7 +111,8 @@ class MarkdownGenerator {
         const date = new Date().toISOString().split('T')[0];
         
         const frontmatter = {
-            title: this.escapeYamlString(articleData.title),
+            title: this.escapeYamlString(articleData.translatedTitle || articleData.title),
+            originalTitle: articleData.translatedTitle ? this.escapeYamlString(articleData.title) : undefined,
             url: articleData.url,
             domain: articleData.domain,
             date: date,
@@ -119,9 +120,25 @@ class MarkdownGenerator {
             author: metadata.author || 'Unknown',
             readingTime: metadata.readingTime || 'Unknown',
             language: metadata.language || 'unknown',
+            detectedLanguage: articleData.detectedLanguage || 'unknown',
             extractedAt: articleData.extractedAt,
             strategy: articleData.strategy || 'unknown'
         };
+        
+        // Claude AI処理情報
+        if (articleData.translatedContent) {
+            frontmatter.translated = !articleData.translationSkipped;
+            frontmatter.translationSource = articleData.detectedLanguage;
+        }
+        
+        if (articleData.summary) {
+            frontmatter.aiSummary = !articleData.summarySkipped;
+            frontmatter.summaryWordCount = articleData.summaryWordCount;
+        }
+        
+        if (articleData.keywords && articleData.keywords.length > 0) {
+            frontmatter.aiKeywords = articleData.keywords;
+        }
         
         // オプションでメタデータを追加
         if (metadata.publishDate) {
@@ -203,25 +220,35 @@ class MarkdownGenerator {
     }
     
     /**
-     * 要約セクション生成（将来のClaude CLI連携用）
+     * 要約セクション生成（Claude CLI連携対応）
      * @param {Object} articleData - 記事データ
      * @returns {Promise<string>} 要約セクション
      */
     async generateSummarySection(articleData) {
-        // Phase 1では簡易的な要約を生成
-        // Sprint 3でClaude CLI連携により実装
+        // Claude AI要約がある場合はそれを使用
+        if (articleData.summary && !articleData.summarySkipped) {
+            return `## 📄 AI要約\n\n${articleData.summary}\n`;
+        }
         
-        const content = articleData.content || '';
+        // 翻訳された内容がある場合
+        const content = articleData.translatedContent || articleData.content || '';
         const wordCount = content.split(/\s+/).length;
         
         if (wordCount < 100) {
             return '## 📄 記事概要\n\n短い記事のため、要約は省略されています。\n';
         }
         
-        // 簡易的な抜粋（最初の200文字）
+        // AI要約が失敗した場合は簡易的な抜粋
         const excerpt = content.slice(0, 200).trim() + '...';
         
-        return `## 📄 記事概要\n\n${excerpt}\n\n*📝 このセクションは将来的にAI要約に置き換わります*\n`;
+        let section = `## 📄 記事概要\n\n${excerpt}\n`;
+        
+        // エラー情報があれば追加
+        if (articleData.summaryError) {
+            section += `\n*⚠️ AI要約の生成に失敗しました: ${articleData.summaryError}*\n`;
+        }
+        
+        return section;
     }
     
     /**
@@ -246,9 +273,26 @@ class MarkdownGenerator {
             sections.push(summarySection);
         }
         
-        // メインコンテンツ
-        sections.push('## 📖 記事内容\n');
-        sections.push(markdownContent);
+        // メインコンテンツ（翻訳優先）
+        if (articleData.translatedContent && !articleData.translationSkipped) {
+            sections.push('## 📖 翻訳済み記事内容\n');
+            sections.push(markdownContent);
+            
+            // 翻訳エラーがあれば注記
+            if (articleData.translationError) {
+                sections.push(`\n*⚠️ 翻訳処理中にエラーが発生しました: ${articleData.translationError}*\n`);
+            }
+            
+            // 原文も含める（折りたたみ形式）
+            if (articleData.content) {
+                sections.push('\n<details>\n<summary>📄 原文を表示</summary>\n\n');
+                sections.push(this.formatPlainTextAsMarkdown(articleData.content));
+                sections.push('\n</details>\n');
+            }
+        } else {
+            sections.push('## 📖 記事内容\n');
+            sections.push(markdownContent);
+        }
         
         // フッター
         sections.push(this.generateFooter(articleData));
