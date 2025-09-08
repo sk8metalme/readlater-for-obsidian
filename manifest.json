@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "ReadLater for Obsidian",
+  "version": "1.0.0",
+  "description": "Save web articles to Obsidian with AI translation and summarization using Claude CLI",
+  
+  "permissions": [
+    "contextMenus",
+    "activeTab",
+    "downloads",
+    "storage",
+    "notifications"
+  ],
+  
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  
+  "options_page": "src/options/options.html",
+  
+  "action": {
+    "default_title": "ReadLater for Obsidian"
+  },
+  
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  
+  "web_accessible_resources": [
+    {
+      "resources": ["src/utils/*.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

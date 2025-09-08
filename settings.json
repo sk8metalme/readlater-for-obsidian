@@ -1,0 +1,96 @@
+{
+  "permissions": {
+    "allowed": [
+      "Edit",
+      "Bash(git commit:*)",
+      "Bash(npm run:*)",
+      "Bash(git add:*)",
+      "Bash(git status)",
+      "Bash(git diff)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git pull)",
+      "Bash(git push)",
+      "Bash(npm install:*)",
+      "Bash(npm test)",
+      "Bash(npm run build)",
+      "Bash(npm run dev)",
+      "Bash(npm run lint)",
+      "Bash(yarn:*)",
+      "Read"
+    ],
+    "denied": [
+      "Bash(rm -rf:*)",
+      "Bash(sudo:*)",
+      "Bash(chmod 777:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git push --force:*)",
+      "Bash(npm publish:*)"
+    ]
+  },
+  "project": {
+    "name": "team-project",
+    "description": "チーム開発プロジェクトの設定",
+    "language": "javascript",
+    "framework": "react"
+  },
+  "git": {
+    "autoStage": false,
+    "requireCommitMessage": true,
+    "commitMessageTemplate": "[type]: brief description\n\n- Detailed changes\n- Impact on other components",
+    "protectedBranches": ["main", "master", "production"],
+    "requirePullRequest": true
+  },
+  "development": {
+    "nodeVersion": "18.x",
+    "packageManager": "npm",
+    "testCommand": "npm test",
+    "buildCommand": "npm run build",
+    "devCommand": "npm run dev",
+    "lintCommand": "npm run lint"
+  },
+  "codeStyle": {
+    "indentation": 2,
+    "semicolons": true,
+    "quotes": "single",
+    "trailingCommas": true,
+    "maxLineLength": 100
+  },
+  "security": {
+    "preventSecretCommits": true,
+    "scanDependencies": true,
+    "requireCodeReview": true
+  },
+  "notifications": {
+    "onError": true,
+    "onSuccess": false,
+    "onCommit": true
+  },
+  "paths": {
+    "exclude": [
+      "node_modules",
+      "dist",
+      "build",
+      ".git",
+      "*.log",
+      ".env*",
+      "coverage"
+    ],
+    "include": [
+      "src/**/*",
+      "public/**/*",
+      "package.json",
+      "README.md",
+      "*.config.js"
+    ]
+  },
+  "team": {
+    "reviewers": ["tech-lead", "senior-dev"],
+    "codeOwners": {
+      "src/components/": ["frontend-team"],
+      "src/api/": ["backend-team"],
+      "docs/": ["documentation-team"]
+    }
+  }
+}
