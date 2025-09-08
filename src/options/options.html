@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ReadLater for Obsidian - 設定</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>📖 ReadLater for Obsidian</h1>
+            <p class="subtitle">Chrome拡張機能の設定</p>
+        </header>
+
+        <main class="main-content">
+            <!-- 設定保存状況の表示 -->
+            <div id="status-message" class="status-message" style="display: none;"></div>
+
+            <!-- 基本設定セクション -->
+            <section class="settings-section">
+                <h2>🔧 基本設定</h2>
+                
+                <div class="setting-group">
+                    <label for="obsidian-path" class="setting-label">
+                        📁 Obsidian保存先フォルダ
+                        <span class="required">*</span>
+                    </label>
+                    <input 
+                        type="text" 
+                        id="obsidian-path" 
+                        class="setting-input" 
+                        placeholder="例: ReadLater または Downloads/ReadLater"
+                    >
+                    <div class="setting-help">
+                        記事を保存するフォルダ名を指定してください。ダウンロードフォルダ内の相対パスで指定できます。
+                    </div>
+                </div>
+            </section>
+
+            <!-- Claude CLI設定セクション -->
+            <section class="settings-section">
+                <h2>🤖 Claude CLI設定</h2>
+                
+                <div class="setting-group">
+                    <label for="claude-api-key" class="setting-label">
+                        🔑 Claude API キー
+                        <span class="required">*</span>
+                    </label>
+                    <div class="input-group">
+                        <input 
+                            type="password" 
+                            id="claude-api-key" 
+                            class="setting-input" 
+                            placeholder="sk-..."
+                        >
+                        <button type="button" id="toggle-api-key" class="toggle-btn">👁️</button>
+                    </div>
+                    <div class="setting-help">
+                        翻訳・要約機能に必要なClaude APIキーを入力してください。
+                        <a href="https://console.anthropic.com/" target="_blank" rel="noopener">取得はこちら</a>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <label class="setting-label">🌐 機能の有効/無効</label>
+                    
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="translation-enabled" checked>
+                            <span class="checkmark"></span>
+                            翻訳機能を有効にする
+                        </label>
+                        <div class="setting-help-small">
+                            外国語の記事を日本語に翻訳します
+                        </div>
+                    </div>
+
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="summary-enabled" checked>
+                            <span class="checkmark"></span>
+                            要約機能を有効にする
+                        </label>
+                        <div class="setting-help-small">
+                            記事の要約を自動生成します
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 詳細設定セクション -->
+            <section class="settings-section">
+                <h2>⚙️ 詳細設定</h2>
+                
+                <div class="setting-group">
+                    <label for="target-language" class="setting-label">🈁 翻訳先言語</label>
+                    <select id="target-language" class="setting-select">
+                        <option value="ja">日本語</option>
+                        <option value="en">English</option>
+                        <option value="zh">中文</option>
+                        <option value="ko">한국어</option>
+                    </select>
+                    <div class="setting-help">
+                        記事を翻訳する際の対象言語を選択してください
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <label for="file-naming" class="setting-label">📄 ファイル名形式</label>
+                    <select id="file-naming" class="setting-select">
+                        <option value="date-title">日付_タイトル形式</option>
+                        <option value="title-date">タイトル_日付形式</option>
+                        <option value="title-only">タイトルのみ</option>
+                    </select>
+                    <div class="setting-help">
+                        保存するMarkdownファイルの命名規則を選択してください
+                    </div>
+                </div>
+            </section>
+
+            <!-- 接続テストセクション -->
+            <section class="settings-section">
+                <h2>🔍 接続テスト</h2>
+                
+                <div class="test-group">
+                    <button id="test-claude-connection" class="test-btn">
+                        🤖 Claude CLI接続テスト
+                    </button>
+                    <div id="claude-test-result" class="test-result"></div>
+                </div>
+
+                <div class="test-group">
+                    <button id="test-file-save" class="test-btn">
+                        💾 ファイル保存テスト
+                    </button>
+                    <div id="file-test-result" class="test-result"></div>
+                </div>
+            </section>
+
+            <!-- 使用方法セクション -->
+            <section class="settings-section">
+                <h2>📖 使用方法</h2>
+                
+                <div class="usage-content">
+                    <ol class="usage-steps">
+                        <li>保存したい記事のページで<strong>右クリック</strong></li>
+                        <li><strong>「📖 後で読む（ReadLater）」</strong>を選択</li>
+                        <li>自動的に記事抽出→翻訳→要約→保存が実行されます</li>
+                        <li>Obsidianの指定フォルダにMarkdownファイルが保存されます</li>
+                    </ol>
+                    
+                    <div class="feature-list">
+                        <h4>主な機能:</h4>
+                        <ul>
+                            <li>🔍 記事の自動抽出（タイトル、本文、メタデータ）</li>
+                            <li>🌐 多言語からの高品質翻訳（Claude CLI使用）</li>
+                            <li>📝 AI要約による主要ポイントの抽出</li>
+                            <li>📁 Obsidian対応Markdown形式での保存</li>
+                            <li>⚡ ワンクリックでの簡単保存</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <div class="button-group">
+                <button id="save-settings" class="save-btn">💾 設定を保存</button>
+                <button id="reset-settings" class="reset-btn">🔄 デフォルトに戻す</button>
+            </div>
+            
+            <div class="footer-info">
+                <p>ReadLater for Obsidian v1.0.0</p>
+                <p>問題の報告: <a href="https://github.com/yourusername/readlater-for-obsidian/issues" target="_blank">GitHub Issues</a></p>
+            </div>
+        </footer>
+    </div>
+
+    <script src="options.js"></script>
+</body>
+</html>
