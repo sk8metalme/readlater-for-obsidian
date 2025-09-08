@@ -126,14 +126,27 @@ async function processExtractedArticle(articleData, settings) {
     try {
         console.log('ReadLater for Obsidian: Processing extracted article', articleData);
         
+        // Markdownファイル生成（改良版）
+        let markdown;
+        try {
+            if (typeof MarkdownGenerator !== 'undefined') {
+                console.log('ReadLater for Obsidian: Using MarkdownGenerator library');
+                const generator = new MarkdownGenerator();
+                const result = await generator.generateMarkdown(articleData, settings);
+                markdown = result.content;
+                console.log('ReadLater for Obsidian: Markdown generated with library', result.filename);
+            } else {
+                console.log('ReadLater for Obsidian: Using fallback markdown generation');
+                markdown = generateBasicMarkdown(articleData);
+            }
+        } catch (error) {
+            console.warn('ReadLater for Obsidian: Markdown generation failed, using fallback', error);
+            markdown = generateBasicMarkdown(articleData);
+        }
+        
         // TODO: Sprint 3で実装予定
         // 1. Claude CLI による翻訳処理
         // 2. Claude CLI による要約処理
-        // 3. Markdownファイル生成
-        // 4. ファイル保存
-        
-        // 現在は基本情報のみでMarkdownを生成（Phase 1の簡易実装）
-        const markdown = generateBasicMarkdown(articleData);
         
         // ファイル保存（Downloads APIを使用）
         await saveMarkdownFile(markdown, articleData.title, settings);

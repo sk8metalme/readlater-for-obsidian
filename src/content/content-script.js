@@ -3,6 +3,19 @@
 
 console.log('ReadLater for Obsidian: Content script loaded', window.location.href);
 
+// 高度な記事抽出ライブラリを読み込み
+let articleExtractor = null;
+
+// ライブラリの初期化
+try {
+    if (typeof ArticleExtractor !== 'undefined') {
+        articleExtractor = new ArticleExtractor();
+        console.log('ReadLater for Obsidian: ArticleExtractor initialized');
+    }
+} catch (error) {
+    console.warn('ReadLater for Obsidian: ArticleExtractor initialization failed, using fallback', error);
+}
+
 // Service Workerからのメッセージを受信
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('ReadLater for Obsidian: Message received', request);
@@ -32,44 +45,58 @@ async function handleExtractArticle(data) {
     try {
         console.log('ReadLater for Obsidian: Starting article extraction', data);
         
-        // 基本情報の取得
-        const basicInfo = {
-            url: data.url || window.location.href,
-            title: data.title || extractTitle(),
-            domain: window.location.hostname,
-            timestamp: new Date().toISOString()
-        };
-        
-        // 記事本文の抽出
-        let content = '';
-        
-        // 選択テキストがある場合はそれを優先
+        // 選択テキストがある場合は簡易処理
         if (data.selection && data.selection.trim()) {
-            content = data.selection.trim();
-            console.log('ReadLater for Obsidian: Using selected text as content');
-        } else {
-            // 自動記事抽出
-            content = await extractMainContent();
-            console.log('ReadLater for Obsidian: Auto-extracted content length:', content.length);
+            return {
+                url: data.url || window.location.href,
+                title: data.title || extractTitle(),
+                domain: window.location.hostname,
+                content: data.selection.trim(),
+                metadata: extractMetadata(),
+                extractedAt: new Date().toISOString(),
+                strategy: 'user-selection'
+            };
         }
         
-        // メタデータの抽出
-        const metadata = extractMetadata();
+        // 高度な記事抽出ライブラリを使用
+        if (articleExtractor) {
+            console.log('ReadLater for Obsidian: Using ArticleExtractor library');
+            return await articleExtractor.extractArticle(data);
+        }
         
-        // 結果の統合
-        const result = {
-            ...basicInfo,
-            content: content,
-            metadata: metadata,
-            extractedAt: new Date().toISOString()
-        };
-        
-        return result;
+        // フォールバック: 従来の抽出方法
+        console.log('ReadLater for Obsidian: Using fallback extraction');
+        return await extractArticleFallback(data);
         
     } catch (error) {
         console.error('ReadLater for Obsidian: Error in handleExtractArticle', error);
         throw new Error(`記事抽出エラー: ${error.message}`);
     }
+}
+
+/**
+ * フォールバック記事抽出
+ * @param {Object} data - 抽出対象データ
+ * @returns {Promise<Object>} 抽出された記事データ
+ */
+async function extractArticleFallback(data) {
+    const basicInfo = {
+        url: data.url || window.location.href,
+        title: data.title || extractTitle(),
+        domain: window.location.hostname,
+        timestamp: new Date().toISOString()
+    };
+    
+    const content = await extractMainContent();
+    const metadata = extractMetadata();
+    
+    return {
+        ...basicInfo,
+        content: content,
+        metadata: metadata,
+        extractedAt: new Date().toISOString(),
+        strategy: 'fallback'
+    };
 }
 
 /**
