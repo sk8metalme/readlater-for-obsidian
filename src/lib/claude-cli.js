@@ -1,5 +1,5 @@
 // ReadLater for Obsidian - Claude CLI Library
-// Claude CLIとの連携、翻訳・要約機能を提供
+// ローカルのClaude CLIとの連携、翻訳・要約機能を提供
 
 /**
  * Claude CLI の主要インターフェース
@@ -16,178 +16,209 @@ class ClaudeCLI {
     }
     
     /**
-     * Claude APIにリクエストを送信
-     * @param {string} prompt - プロンプト
-     * @param {Object} options - リクエストオプション
-     * @returns {Promise<string>} APIレスポンス
+     * Claude CLIの利用可能性をチェック
+     * @returns {boolean} Claude CLIが利用可能かどうか
      */
-    async makeRequest(prompt, options = {}) {
-        const requestData = {
-            model: this.model,
-            max_tokens: options.maxTokens || this.maxTokens,
-            temperature: options.temperature || this.temperature,
-            messages: [
-                {
-                    role: 'user',
-                    content: prompt
-                }
-            ]
-        };
-        
-        const requestOptions = {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': this.apiKey,
-                'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify(requestData)
-        };
-        
+    checkClaudeAvailability() {
         try {
-            let lastError;
-            const maxRetries = options.enableRetry ? this.maxRetries : 1;
-            
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    console.log(`Claude API: Making request (attempt ${attempt}/${maxRetries})`);
-                    
-                    const response = await fetch(`${this.baseUrl}/messages`, requestOptions);
-                    
-                    if (!response.ok) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMessage = errorData.error?.message || `HTTP ${response.status}`;
-                        
-                        // レート制限の場合はリトライ
-                        if (response.status === 429 && attempt < maxRetries) {
-                            const delay = this.rateLimitDelay * Math.pow(2, attempt - 1);
-                            console.log(`Claude API: Rate limited, retrying in ${delay}ms`);
-                            await this.sleep(delay);
-                            continue;
-                        }
-                        
-                        throw new Error(`API request failed: ${errorMessage}`);
-                    }
-                    
-                    const responseData = await response.json();
-                    this.validateResponse(responseData);
-                    
-                    return responseData.content[0].text;
-                    
-                } catch (error) {
-                    lastError = error;
-                    
-                    // ネットワークエラーの場合はリトライ
-                    if (attempt < maxRetries && this.isRetryableError(error)) {
-                        const delay = this.rateLimitDelay * attempt;
-                        console.log(`Claude API: Request failed, retrying in ${delay}ms`, error.message);
-                        await this.sleep(delay);
-                        continue;
-                    }
-                    
-                    throw error;
-                }
+            // ブラウザ環境では常にfalse
+            if (typeof window !== 'undefined') {
+                console.log('ClaudeCLI: Browser environment detected, CLI not available');
+                return false;
             }
             
-            throw lastError;
+            // Node.js環境でのみチェック
+            const { execSync } = require('child_process');
+            execSync('claude --version', { stdio: 'ignore', timeout: 5000 });
+            console.log('ClaudeCLI: Claude CLI is available');
+            return true;
+        } catch (error) {
+            console.warn('ClaudeCLI: Claude CLI not available:', error.message);
+            return false;
+        }
+    }
+    
+    /**
+     * Claude CLIにクエリを送信
+     * @param {string} prompt - プロンプト
+     * @param {Object} options - リクエストオプション
+     * @returns {Promise<string>} Claude CLIレスポンス
+     */
+    async makeRequest(prompt, options = {}) {
+        if (!this.isAvailable) {
+            throw new Error('Claude CLI is not available. Please install Claude CLI first.');
+        }
+        
+        try {
+            const { spawn } = require('child_process');
+            
+            // Claude CLIコマンドの構築
+            const args = [
+                '-p',  // 印刷モード
+                '--model', options.model || this.model,
+                '--max-turns', String(options.maxTurns || this.maxTurns),
+                '--output-format', 'text'  // テキスト形式で出力
+            ];
+            
+            // プロンプトを引数として追加
+            args.push(prompt);
+            
+            console.log('ClaudeCLI: Executing command', { 
+                model: options.model || this.model,
+                promptLength: prompt.length 
+            });
+            
+            return new Promise((resolve, reject) => {
+                const claudeProcess = spawn('claude', args, {
+                    stdio: ['ignore', 'pipe', 'pipe'],
+                    shell: true
+                });
+                
+                let stdout = '';
+                let stderr = '';
+                
+                claudeProcess.stdout.on('data', (data) => {
+                    stdout += data.toString();
+                });
+                
+                claudeProcess.stderr.on('data', (data) => {
+                    stderr += data.toString();
+                });
+                
+                claudeProcess.on('close', (code) => {
+                    if (code === 0) {
+                        const response = stdout.trim();
+                        if (response) {
+                            resolve(response);
+                        } else {
+                            reject(new Error('Empty response from Claude CLI'));
+                        }
+                    } else {
+                        reject(new Error(`Claude CLI failed with code ${code}: ${stderr || 'Unknown error'}`));
+                    }
+                });
+                
+                claudeProcess.on('error', (error) => {
+                    reject(new Error(`Claude CLI execution error: ${error.message}`));
+                });
+                
+                // タイムアウト処理
+                const timeoutId = setTimeout(() => {
+                    claudeProcess.kill('SIGTERM');
+                    reject(new Error(`Claude CLI request timed out after ${this.timeout}ms`));
+                }, this.timeout);
+                
+                claudeProcess.on('close', () => {
+                    clearTimeout(timeoutId);
+                });
+            });
             
         } catch (error) {
-            console.error('Claude API: Request failed', error);
-            throw error;
+            console.error('ClaudeCLI: Request failed:', error);
+            throw new Error(`Claude CLI request failed: ${error.message}`);
         }
     }
     
     /**
-     * APIレスポンスの検証
-     * @param {Object} response - APIレスポンス
+     * レスポンスの検証（従来のAPI互換性のため）
+     * @param {string} response - Claude CLIからのレスポンス
+     * @returns {string} 検証済みレスポンス
      */
     validateResponse(response) {
-        if (!response || !response.content || !Array.isArray(response.content)) {
-            throw new Error('Invalid Claude API response format');
+        if (!response || typeof response !== 'string') {
+            throw new Error('Invalid response format from Claude CLI');
         }
         
-        if (response.content.length === 0) {
-            throw new Error('Empty response from Claude API');
+        if (response.trim().length === 0) {
+            throw new Error('Empty content in Claude CLI response');
         }
         
-        if (!response.content[0].text) {
-            throw new Error('No text content in Claude API response');
-        }
+        return response.trim();
     }
     
     /**
-     * リトライ可能なエラーかどうかを判定
-     * @param {Error} error - エラーオブジェクト
-     * @returns {boolean} リトライ可能かどうか
+     * スリープ関数（レート制限対応）
+     * @param {number} ms - ミリ秒
+     * @returns {Promise} スリープPromise
      */
-    isRetryableError(error) {
-        const retryableMessages = [
-            'network error',
-            'timeout',
-            'connection',
-            'rate limit'
-        ];
-        
-        const message = error.message.toLowerCase();
-        return retryableMessages.some(keyword => message.includes(keyword));
-    }
-    
-    /**
-     * 待機ユーティリティ
-     * @param {number} ms - 待機時間（ミリ秒）
-     * @returns {Promise<void>}
-     */
-    sleep(ms) {
+    async sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 }
 
 /**
- * 言語検出サービス
+ * 言語検出器（ローカル処理、APIキー不要）
  */
 class LanguageDetector {
     constructor() {
+        // 言語パターンの定義
         this.patterns = {
-            ja: /[\u3040-\u309F\u30A0-\u30FF]/,  // ひらがな・カタカナ
-            zh: /[\u4E00-\u9FFF]/,               // 漢字（中国語・日本語共通）
-            ko: /[\uAC00-\uD7AF]/,               // ハングル
-            ar: /[\u0600-\u06FF]/,               // アラビア語
-            th: /[\u0E00-\u0E7F]/,               // タイ語
-            hi: /[\u0900-\u097F]/                // ヒンディー語
+            ja: [
+                /[\u3040-\u309F]/,  // ひらがな
+                /[\u30A0-\u30FF]/,  // カタカナ
+                /[\u4E00-\u9FAF]/   // 漢字
+            ],
+            zh: [
+                /[\u4E00-\u9FAF]/,  // 漢字
+                /[的了是在不一有大人]/  // 中国語特有の文字
+            ],
+            ko: [
+                /[\uAC00-\uD7AF]/,  // ハングル
+                /[\u1100-\u11FF]/,  // ハングル字母
+                /[\u3130-\u318F]/   // ハングル互換字母
+            ],
+            en: [
+                /\b(the|and|or|but|in|on|at|to|for|of|with|by|is|are|was|were|have|has|had|will|would|can|could|this|that)\b/gi,
+                /\b\w+(ing|ed|ly|tion|ness|ment|able|ible)\b/gi
+            ]
         };
     }
     
     /**
      * テキストの言語を検出
      * @param {string} text - 検出対象テキスト
-     * @returns {Promise<Object>} 検出結果
+     * @returns {Promise<Object>} 検出結果 {language, confidence}
      */
     async detectLanguage(text) {
-        if (!text || text.trim().length === 0) {
-            return { language: 'unknown', confidence: 0 };
+        if (!text || typeof text !== 'string') {
+            return { language: 'unknown', confidence: 0.0 };
         }
         
-        if (text.length < 3) {
+        const cleanText = text.trim();
+        if (cleanText.length === 0) {
+            return { language: 'unknown', confidence: 0.0 };
+        }
+        
+        if (cleanText.length < 3) {
             return { language: 'unknown', confidence: 0.1 };
         }
         
-        const sampleText = text.slice(0, 1000); // 最初の1000文字を分析
+        const sampleText = cleanText.slice(0, 500); // 最初の500文字でサンプリング
         const results = [];
         
-        // パターンマッチング言語検出
-        for (const [lang, pattern] of Object.entries(this.patterns)) {
-            const matches = sampleText.match(new RegExp(pattern, 'g'));
-            if (matches) {
-                const confidence = Math.min(matches.length / sampleText.length * 10, 1);
-                results.push({ language: lang, confidence });
-            }
-        }
-        
-        // 日本語の特別処理（ひらがな・カタカナがあれば日本語）
+        // 日本語検出
         const hasHiragana = /[\u3040-\u309F]/.test(sampleText);
         const hasKatakana = /[\u30A0-\u30FF]/.test(sampleText);
         if (hasHiragana || hasKatakana) {
             return { language: 'ja', confidence: 0.9 };
+        }
+        
+        // 韓国語検出
+        const hasHangul = /[\uAC00-\uD7AF]/.test(sampleText);
+        if (hasHangul) {
+            return { language: 'ko', confidence: 0.95 };
+        }
+        
+        // 中国語検出（漢字ベース）
+        const chineseChars = sampleText.match(/[\u4E00-\u9FAF]/g);
+        if (chineseChars && chineseChars.length > 5) {
+            // 中国語特有の文字パターンをチェック
+            const chineseIndicators = /[的了是在不一有大人这个我们来说]/g;
+            const indicators = sampleText.match(chineseIndicators);
+            if (indicators && indicators.length > 2) {
+                return { language: 'zh', confidence: 1.0 };
+            }
+            return { language: 'zh', confidence: 0.7 };
         }
         
         // アルファベットベースの言語検出（改良版）
@@ -235,17 +266,18 @@ class LanguageDetector {
             return results[0];
         }
         
-        return { language: 'unknown', confidence: 0 };
+        // デフォルト
+        return { language: 'unknown', confidence: 0.0 };
     }
 }
 
 /**
- * 翻訳サービス
+ * 翻訳サービス（Claude CLI使用）
  */
 class TranslationService {
-    constructor(claudeAPI) {
-        this.claudeAPI = claudeAPI;
-        this.languageDetector = new LanguageDetector();
+    constructor(claudeCLI) {
+        this.claudeCLI = claudeCLI;
+        this.rateLimitDelay = 2000; // 2秒
     }
     
     /**
@@ -258,15 +290,8 @@ class TranslationService {
      */
     async translateText(text, sourceLanguage, targetLanguage, options = {}) {
         try {
-            // 空文字列の場合
             if (!text || text.trim().length === 0) {
-                return {
-                    translatedText: '',
-                    sourceLanguage,
-                    targetLanguage,
-                    skipped: true,
-                    reason: 'Empty text'
-                };
+                throw new Error('Empty text provided for translation');
             }
             
             // 同じ言語の場合はスキップ
@@ -276,7 +301,8 @@ class TranslationService {
                     sourceLanguage,
                     targetLanguage,
                     skipped: true,
-                    reason: 'Same language'
+                    reason: 'Same language detected',
+                    options
                 };
             }
             
@@ -288,10 +314,7 @@ class TranslationService {
                 'ko': '韓国語',
                 'fr': 'フランス語',
                 'de': 'ドイツ語',
-                'es': 'スペイン語',
-                'it': 'イタリア語',
-                'pt': 'ポルトガル語',
-                'ru': 'ロシア語'
+                'es': 'スペイン語'
             };
             
             const sourceLangName = languageNames[sourceLanguage] || sourceLanguage;
@@ -319,10 +342,9 @@ class TranslationService {
                 isTitle: options.isTitle
             });
             
-            const translatedText = await this.claudeAPI.makeRequest(prompt, {
-                maxTokens: Math.min(text.length * 2 + 500, 4000),
-                temperature: 0.1, // 翻訳では一貫性を重視
-                enableRetry: true
+            const translatedText = await this.claudeCLI.makeRequest(prompt, {
+                model: 'sonnet',
+                maxTurns: 1
             });
             
             return {
@@ -348,36 +370,31 @@ class TranslationService {
      * @returns {Promise<Array<Object>>} 翻訳結果配列
      */
     async batchTranslate(texts, sourceLanguage, targetLanguage, options = {}) {
-        if (!texts || texts.length === 0) {
-            return [];
-        }
+        const results = [];
         
-        // 小さなバッチの場合は一度に翻訳
-        if (texts.length <= 5 && texts.every(text => text.length < 500)) {
+        for (let i = 0; i < texts.length; i++) {
+            const text = texts[i];
+            
             try {
-                const combinedText = texts.join('\n---\n');
-                const result = await this.translateText(combinedText, sourceLanguage, targetLanguage, options);
+                const result = await this.translateText(text, sourceLanguage, targetLanguage, options);
+                results.push(result);
                 
-                const translatedTexts = result.translatedText.split(/\n---\n|\n—\n|\n\*\*\*\n/);
-                
-                return texts.map((originalText, index) => ({
-                    translatedText: translatedTexts[index]?.trim() || originalText,
-                    sourceLanguage,
-                    targetLanguage,
-                    skipped: false,
-                    originalText
-                }));
+                // レート制限対応（最後以外は待機）
+                if (i < texts.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
+                }
                 
             } catch (error) {
-                console.warn('TranslationService: Batch translation failed, falling back to individual', error);
+                console.error(`TranslationService: Batch translation failed for text ${i}:`, error);
+                results.push({
+                    translatedText: text, // フォールバック
+                    sourceLanguage,
+                    targetLanguage,
+                    skipped: true,
+                    error: error.message,
+                    options
+                });
             }
-        }
-        
-        // 個別翻訳にフォールバック
-        const results = [];
-        for (const text of texts) {
-            const result = await this.translateText(text, sourceLanguage, targetLanguage, options);
-            results.push({ ...result, originalText: text });
         }
         
         return results;
@@ -385,11 +402,11 @@ class TranslationService {
 }
 
 /**
- * 要約サービス
+ * 要約サービス（Claude CLI使用）
  */
 class SummaryService {
-    constructor(claudeAPI) {
-        this.claudeAPI = claudeAPI;
+    constructor(claudeCLI) {
+        this.claudeCLI = claudeCLI;
         this.minWordCount = 100; // 最小単語数
     }
     
@@ -402,28 +419,22 @@ class SummaryService {
     async generateSummary(text, options = {}) {
         try {
             if (!text || text.trim().length === 0) {
-                return {
-                    summary: '',
-                    skipped: true,
-                    reason: 'Empty text'
-                };
+                throw new Error('Empty text provided for summarization');
             }
             
             const wordCount = text.split(/\s+/).length;
+            const style = options.style || 'structured';
+            const maxLength = options.maxLength || 400;
             
             // 短すぎる記事はスキップ
             if (wordCount < this.minWordCount) {
                 return {
                     summary: '',
-                    wordCount,
+                    summaryWordCount: 0,
                     skipped: true,
-                    reason: 'Article too short for summary'
+                    reason: `Article too short (${wordCount} words, minimum ${this.minWordCount})`
                 };
             }
-            
-            // 要約スタイルの設定
-            const style = options.style || 'structured';
-            const maxLength = options.maxLength || 500;
             
             let prompt = '以下の記事の要約を日本語で作成してください。\n\n';
             
@@ -460,10 +471,9 @@ class SummaryService {
                 maxLength
             });
             
-            const summary = await this.claudeAPI.makeRequest(prompt, {
-                maxTokens: Math.min(maxLength * 2, 2000),
-                temperature: 0.2,
-                enableRetry: true
+            const summary = await this.claudeCLI.makeRequest(prompt, {
+                model: 'sonnet',
+                maxTurns: 1
             });
             
             const summaryWordCount = summary.split(/\s+/).length;
@@ -471,11 +481,12 @@ class SummaryService {
             
             return {
                 summary: summary.trim(),
-                wordCount,
                 summaryWordCount,
                 summaryRatio,
+                originalWordCount: wordCount,
+                skipped: false,
                 style,
-                skipped: false
+                maxLength
             };
             
         } catch (error) {
@@ -486,47 +497,58 @@ class SummaryService {
     
     /**
      * キーワード抽出
-     * @param {string} text - 対象テキスト
-     * @param {Object} options - オプション
+     * @param {string} text - キーワード抽出対象テキスト
+     * @param {Object} options - 抽出オプション
      * @returns {Promise<Object>} キーワード抽出結果
      */
     async generateKeywords(text, options = {}) {
         try {
-            const maxKeywords = options.maxKeywords || 10;
+            const maxKeywords = options.maxKeywords || 8;
             
-            const prompt = `以下の記事から重要なキーワードを${maxKeywords}個以内で抽出してください。\n\n` +
-                          '日本語で、カンマ区切りで出力してください。\n' +
-                          'キーワードのみを出力し、説明や前置きは不要です。\n\n' +
-                          '記事内容:\n' + text;
+            const prompt = `以下の記事から重要なキーワードを抽出してください。
             
-            const keywordsText = await this.claudeAPI.makeRequest(prompt, {
-                maxTokens: 200,
-                temperature: 0.1,
-                enableRetry: true
+要求:
+- 最大${maxKeywords}個のキーワードを抽出
+- 単語またはフレーズ形式
+- 重要度順に並べる
+- カンマ区切りで出力
+- キーワードのみを出力（説明不要）
+
+記事内容:
+${text}`;
+            
+            const keywordsText = await this.claudeCLI.makeRequest(prompt, {
+                model: 'sonnet',
+                maxTurns: 1
             });
             
-            const keywords = keywordsText.split(',')
-                .map(keyword => keyword.trim())
-                .filter(keyword => keyword.length > 0)
+            const keywords = keywordsText
+                .split(',')
+                .map(k => k.trim())
+                .filter(k => k.length > 0)
                 .slice(0, maxKeywords);
             
             return {
                 keywords,
-                count: keywords.length
+                extractedAt: new Date().toISOString()
             };
-            
+
         } catch (error) {
             console.error('SummaryService: Keyword extraction failed', error);
-            throw new Error(`Keyword extraction failed: ${error.message}`);
+            return {
+                keywords: [],
+                error: error.message,
+                extractedAt: new Date().toISOString()
+            };
         }
     }
 }
 
 // モジュールのエクスポート
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { ClaudeAPI, LanguageDetector, TranslationService, SummaryService };
+    module.exports = { ClaudeCLI, LanguageDetector, TranslationService, SummaryService };
 } else {
-    window.ClaudeAPI = ClaudeAPI;
+    window.ClaudeCLI = ClaudeCLI;
     window.LanguageDetector = LanguageDetector;
     window.TranslationService = TranslationService;
     window.SummaryService = SummaryService;

@@ -4,7 +4,7 @@
 // 必要なライブラリをインポート
 try {
     importScripts(
-        'src/lib/claude-api.js',
+        'src/lib/claude-cli.js',
         'src/lib/markdown-generator.js',
         'src/utils/error-handler.js'
     );
@@ -290,25 +290,28 @@ function validateSettings(settings) {
  */
 async function processWithClaude(articleData, settings) {
     try {
-        if (!settings.claudeApiKey) {
-            throw new Error('Claude API key not configured');
-        }
+        // Claude CLIはAPIキー不要
         
-        // Claude APIライブラリの初期化
-        let claudeAPI, languageDetector, translationService, summaryService;
+        // Claude CLIライブラリの初期化
+        let claudeCLI, languageDetector, translationService, summaryService;
         
         try {
-            if (typeof ClaudeAPI !== 'undefined') {
-                claudeAPI = new ClaudeAPI(settings.claudeApiKey);
+            if (typeof ClaudeCLI !== 'undefined') {
+                claudeCLI = new ClaudeCLI();
                 languageDetector = new LanguageDetector();
-                translationService = new TranslationService(claudeAPI);
-                summaryService = new SummaryService(claudeAPI);
-                console.log('ReadLater for Obsidian: Claude API services initialized');
+                translationService = new TranslationService(claudeCLI);
+                summaryService = new SummaryService(claudeCLI);
+                console.log('ReadLater for Obsidian: Claude CLI services initialized');
+                
+                // Claude CLIの利用可能性をチェック
+                if (!claudeCLI.isAvailable) {
+                    throw new Error('Claude CLI is not available on this system. Please install Claude CLI first.');
+                }
             } else {
-                throw new Error('Claude API library not available');
+                throw new Error('Claude CLI library not available');
             }
         } catch (error) {
-            console.error('ReadLater for Obsidian: Failed to initialize Claude services', error);
+            console.error('ReadLater for Obsidian: Failed to initialize Claude CLI services', error);
             throw error;
         }
         

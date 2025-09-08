@@ -1,13 +1,18 @@
-# ReadLater for Obsidian - Claude API ローカルテスト
+# ReadLater for Obsidian - Claude CLI ローカルテスト
 
-このディレクトリには、Claude API機能のローカルテスト用ファイルが含まれています。
+このディレクトリには、Claude CLI機能のローカルテスト用ファイルが含まれています。
 
 ## 📁 ファイル構成
 
-- `claude-local-test.js` - メイン機能のテストスクリプト
+- `claude-cli-local-test.js` - Claude CLI対応メイン機能テストスクリプト **（推奨）**
+- `claude-local-test.js` - 旧Claude API版テストスクリプト（非推奨）
 - `browser-test.html` - ブラウザ環境での統合テスト
 - `performance-test.js` - パフォーマンステスト
 - `README.md` - このファイル
+
+## ⚠️ 重要な変更：Claude CLI対応
+
+**Claude CLIはAPIキーが不要**です。ローカルにインストールされたClaude CLIを使用します。
 
 ## 🧪 テスト種類
 
@@ -19,9 +24,19 @@
 node tests/manual/claude-local-test.js offline
 ```
 
-### 2. 完全機能テスト（APIキー必要）
+### 2. Claude CLI完全機能テスト（APIキー不要）
 
-Claude APIを使用した翻訳・要約機能を含む全機能をテストします。
+ローカルのClaude CLIを使用した翻訳・要約機能を含む全機能をテストします。
+
+```bash
+# Claude CLI対応版（推奨）
+node tests/manual/claude-cli-local-test.js
+
+# Claude CLIがインストールされていない場合はオフラインモード
+node tests/manual/claude-cli-local-test.js offline
+```
+
+### 3. 旧Claude API版テスト（非推奨）
 
 ```bash
 # 環境変数で設定
@@ -32,7 +47,7 @@ node tests/manual/claude-local-test.js
 node tests/manual/claude-local-test.js "sk-your-api-key-here"
 ```
 
-### 3. ブラウザテスト
+### 4. ブラウザテスト
 
 Webブラウザで直接テストできるHTMLページを提供します。
 
@@ -46,13 +61,20 @@ npx serve .
 open http://localhost:8000/tests/manual/browser-test.html
 ```
 
-### 4. パフォーマンステスト
+### 5. パフォーマンステスト
 
 言語検出機能のパフォーマンスを測定します。
 
 ```bash
 node tests/manual/performance-test.js
 ```
+
+## 📋 Claude CLIのインストール
+
+Claude CLIが必要な場合は、以下からインストールしてください：
+
+- **公式ドキュメント**: [https://docs.anthropic.com/ja/docs/claude-code/cli-reference](https://docs.anthropic.com/ja/docs/claude-code/cli-reference)
+- **インストール後の確認**: `claude --version`
 
 ## 📊 最新テスト結果
 
