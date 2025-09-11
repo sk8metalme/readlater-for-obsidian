@@ -784,22 +784,8 @@ async function processWithNativeClaude(articleData, settings) {
     }
     result.detectedLanguage = lang; result.languageConfidence = conf;
 
-     // Translation (title only - full content translation removed)
-     if (settings.translationEnabled && lang !== (settings.targetLanguage || 'ja')) {
-         try {
-             const titleTr = await bridge.translate(articleData.title, lang, settings.targetLanguage || 'ja', { isTitle: true });
-             result.translatedTitle = titleTr.translatedText || titleTr.data || titleTr.text || '';
-             result.translatedContent = null; // 全文翻訳は削除
-             result.translationSkipped = false;
-             console.log('ReadLater for Obsidian: Title translation completed', {
-                 originalTitle: articleData.title,
-                 translatedTitle: result.translatedTitle
-             });
-         } catch (e) {
-             console.warn('Translation via native host failed', e);
-             result.translationError = e.message;
-         }
-     }
+     // Translation functionality removed - keep original language
+     // No translation processing - articles are saved in their original language
 
      // Summarization (hierarchical for stability)
      if (settings.summaryEnabled) {

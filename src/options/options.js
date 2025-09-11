@@ -7,9 +7,7 @@ console.log('ReadLater for Obsidian: Options page loaded');
 const elements = {
     // 入力フィールド
     obsidianPath: document.getElementById('obsidian-path'),
-    translationEnabled: document.getElementById('translation-enabled'),
     summaryEnabled: document.getElementById('summary-enabled'),
-    targetLanguage: document.getElementById('target-language'),
     fileNaming: document.getElementById('file-naming'),
     
     // 集約保存設定
@@ -32,9 +30,7 @@ const elements = {
 // デフォルト設定
 const defaultSettings = {
     obsidianPath: 'ReadLater',
-    translationEnabled: true,
     summaryEnabled: true,
-    targetLanguage: 'ja',
     fileNaming: 'date-title',
     aggregatedSavingEnabled: false,
     aggregatedFileName: 'ReadLater_Articles.md'
@@ -69,9 +65,7 @@ async function loadSettings() {
         
         // フォームに設定値を反映
         elements.obsidianPath.value = settings.obsidianPath || defaultSettings.obsidianPath;
-        elements.translationEnabled.checked = settings.translationEnabled !== false;
         elements.summaryEnabled.checked = settings.summaryEnabled !== false;
-        elements.targetLanguage.value = settings.targetLanguage || defaultSettings.targetLanguage;
         elements.fileNaming.value = settings.fileNaming || defaultSettings.fileNaming;
         
         // 集約保存設定の反映
@@ -287,9 +281,7 @@ async function saveSettings() {
         // 入力値の取得と検証
         const settings = {
             obsidianPath: elements.obsidianPath.value.trim(),
-            translationEnabled: elements.translationEnabled.checked,
             summaryEnabled: elements.summaryEnabled.checked,
-            targetLanguage: elements.targetLanguage.value,
             fileNaming: elements.fileNaming.value,
             aggregatedSavingEnabled: elements.aggregatedSavingEnabled.checked,
             aggregatedFileName: elements.aggregatedFileName.value.trim()

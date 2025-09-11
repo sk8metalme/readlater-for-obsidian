@@ -144,12 +144,7 @@ class MarkdownGenerator {
             publish: false
         };
         
-        // Claude AI処理情報（タイトル翻訳のみ）
-        if (articleData.translatedTitle) {
-            frontmatter.titleTranslated = true;
-            frontmatter.translationSource = articleData.detectedLanguage;
-            frontmatter.translationDate = date;
-        }
+        // Translation functionality removed - no translation processing
         
         if (articleData.summary) {
             frontmatter.aiSummary = !articleData.summarySkipped;
