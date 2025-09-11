@@ -1,0 +1,290 @@
+// ReadLater for Obsidian - Aggregated File Manager
+// 集約Markdownファイルの管理を担当するクラス
+
+/**
+ * 集約Markdownファイルの管理クラス
+ */
+class AggregatedFileManager {
+    constructor(options = {}) {
+        this.options = {
+            encoding: 'utf-8',
+            backup: false,
+            maxFileSize: 10 * 1024 * 1024, // 10MB
+            ...options
+        };
+    }
+
+    /**
+     * 設定からファイルパスを生成
+     * @param {Object} settings - ユーザー設定
+     * @returns {string} ファイルパス
+     */
+    generateFilePath(settings) {
+        // デフォルトファイル名
+        const defaultFileName = 'ReadLater_Articles.md';
+        
+        // 設定からファイル名を取得
+        let fileName = settings.fileName || defaultFileName;
+        
+        // 元のファイル名をチェックして、不正なパスが含まれている場合はデフォルトを使用
+        if (fileName.includes('../') || fileName.includes('./') || fileName.includes('/') || fileName.includes('\\')) {
+            fileName = defaultFileName;
+        } else {
+            // セキュリティ: 残りの不正文字を除去
+            fileName = fileName.replace(/[^a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF._-]/g, '');
+        }
+        
+        // .mdファイル以外は拒否、または空文字列の場合
+        if (!fileName.endsWith('.md') || fileName === '' || fileName === '.md') {
+            fileName = defaultFileName;
+        }
+
+        return fileName;
+    }
+
+    /**
+     * 既存ファイルの解析
+     * @param {string} content - ファイル内容
+     * @returns {Promise<Object>} 解析結果
+     */
+    async parseExistingFile(content) {
+        if (!content || typeof content !== 'string') {
+            return {
+                tableContent: '',
+                articles: []
+            };
+        }
+
+        const result = {
+            tableContent: '',
+            articles: []
+        };
+
+        // テーブルセクションの抽出
+        const tableRegex = /\|\s*タイトル\s*\|[\s\S]*?(?=\n##|\n$|$)/;
+        const tableMatch = content.match(tableRegex);
+        
+        if (tableMatch) {
+            result.tableContent = tableMatch[0];
+            
+            // テーブル行の解析
+            const lines = result.tableContent.split('\n');
+            for (let i = 2; i < lines.length; i++) { // Skip header and separator
+                const line = lines[i].trim();
+                if (line.startsWith('|') && line.endsWith('|')) {
+                    const columns = line.split('|').map(col => col.trim()).slice(1, -1);
+                    if (columns.length >= 4) {
+                        result.articles.push({
+                            title: columns[0],
+                            url: columns[1],
+                            summary: columns[2],
+                            date: columns[3]
+                        });
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * 記事を集約ファイルに追加
+     * @param {Object} articleData - 記事データ
+     * @param {Object} settings - ユーザー設定
+     * @returns {Promise<Object>} 追加結果
+     */
+    async addArticleToAggregatedFile(articleData, settings) {
+        const filePath = this.generateFilePath(settings);
+        
+        try {
+            // 既存ファイルの読み込み
+            let existingContent;
+            try {
+                existingContent = await this.readFile(filePath);
+            } catch (error) {
+                // ファイルが存在しない場合は新規作成
+                existingContent = '';
+            }
+
+            let newContent;
+            if (existingContent) {
+                // 既存ファイルの形式チェック
+                const parsedFile = await this.parseExistingFile(existingContent);
+                if (this.isValidAggregatedContent(existingContent)) {
+                    newContent = await this.appendArticleToExisting(existingContent, articleData, settings, parsedFile);
+                } else {
+                    // 無効なファイル形式の場合は新規作成
+                    newContent = await this.createNewAggregatedFile(articleData, settings);
+                }
+            } else {
+                // 新規ファイル作成
+                newContent = await this.createNewAggregatedFile(articleData, settings);
+            }
+
+            // ファイルの書き込み
+            await this.writeFile(filePath, newContent);
+
+            return {
+                success: true,
+                filePath,
+                articlesCount: 1 // 簡易実装
+            };
+
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    /**
+     * 新規集約ファイルを作成
+     * @param {Object} articleData - 記事データ
+     * @param {Object} settings - ユーザー設定
+     * @returns {Promise<string>} ファイル内容
+     */
+    async createNewAggregatedFile(articleData, settings) {
+        const date = articleData.savedDate.toISOString().split('T')[0];
+        const shortSummary = articleData.shortSummary || articleData.summary?.substring(0, settings.maxTableSummaryLength || 100) || '';
+
+        const content = `# ReadLater Articles
+
+| タイトル | URL | 要約 | 日時 |
+|---------|-----|------|------|
+| ${articleData.title} | ${articleData.url} | ${shortSummary} | ${date} |
+
+## 記事詳細
+
+### ${articleData.title}
+
+**元記事**: [${articleData.title}](${articleData.url})
+**保存日**: ${date}
+
+${articleData.content}
+
+---
+*Generated by ReadLater for Obsidian*
+`;
+
+        return content;
+    }
+
+    /**
+     * 既存ファイルに記事を追加
+     * @param {string} existingContent - 既存のファイル内容
+     * @param {Object} articleData - 記事データ
+     * @param {Object} settings - ユーザー設定
+     * @param {Object} parsedFile - 解析済みファイルデータ
+     * @returns {Promise<string>} 更新されたファイル内容
+     */
+    async appendArticleToExisting(existingContent, articleData, settings, parsedFile) {
+        const date = articleData.savedDate.toISOString().split('T')[0];
+        const shortSummary = articleData.shortSummary || articleData.summary?.substring(0, settings.maxTableSummaryLength || 100) || '';
+
+        // テーブルに新しい行を追加
+        const newTableRow = `| ${articleData.title} | ${articleData.url} | ${shortSummary} | ${date} |`;
+        
+        let updatedContent = existingContent;
+
+        // テーブルの更新
+        if (parsedFile.tableContent) {
+            const newTableContent = parsedFile.tableContent + '\n' + newTableRow;
+            updatedContent = updatedContent.replace(parsedFile.tableContent, newTableContent);
+        }
+
+        // 記事詳細セクションに追加
+        let articleContent;
+        if (articleData.translatedContent && !articleData.translationSkipped) {
+            articleContent = `## 翻訳済み内容
+
+${articleData.translatedContent}
+
+<details>
+<summary>原文を表示</summary>
+
+${articleData.content || 'コンテンツが取得できませんでした。'}
+
+</details>`;
+        } else {
+            articleContent = `## 内容
+
+${articleData.content || 'コンテンツが取得できませんでした。'}`;
+        }
+
+        const summarySection = articleData.summary ? `\n## 要約\n\n${articleData.summary}` : '';
+
+        const articleDetail = `\n### ${articleData.title}
+
+**元記事**: [${articleData.title}](${articleData.url})
+**保存日**: ${date}${summarySection}
+
+${articleContent}
+`;
+
+        // 詳細セクションの最後に追加
+        const detailSectionRegex = /(## 記事詳細[\s\S]*?)(\n---\n.*Generated by ReadLater|$)/;
+        const detailMatch = updatedContent.match(detailSectionRegex);
+        
+        if (detailMatch) {
+            const updatedDetailSection = detailMatch[1] + articleDetail + '\n';
+            updatedContent = updatedContent.replace(detailMatch[1], updatedDetailSection);
+        } else {
+            // 詳細セクションが見つからない場合は最後に追加
+            updatedContent += `\n## 記事詳細${articleDetail}`;
+        }
+
+        return updatedContent;
+    }
+
+    /**
+     * 有効な集約ファイル形式かチェック
+     * @param {string} content - ファイル内容
+     * @returns {boolean} 有効かどうか
+     */
+    isValidAggregatedContent(content) {
+        if (!content || typeof content !== 'string') {
+            return false;
+        }
+
+        // 必要なセクションの存在確認
+        const hasTitle = /^# /.test(content.trim());
+        const hasTable = /\| タイトル \|/.test(content);
+        const hasDetails = /## 記事詳細/.test(content);
+
+        return hasTitle && (hasTable || hasDetails);
+    }
+
+    /**
+     * ファイル読み込み（モック対応）
+     * @param {string} filePath - ファイルパス
+     * @returns {Promise<string>} ファイル内容
+     */
+    async readFile(filePath) {
+        // 実装は後でNative Messagingに接続
+        // テスト用のモックポイント
+        throw new Error('File not found');
+    }
+
+    /**
+     * ファイル書き込み（モック対応）
+     * @param {string} filePath - ファイルパス
+     * @param {string} content - ファイル内容
+     * @returns {Promise<Object>} 書き込み結果
+     */
+    async writeFile(filePath, content) {
+        // 実装は後でNative Messagingに接続
+        // テスト用のモックポイント
+        return { success: true };
+    }
+}
+
+// モジュールのエクスポート
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { AggregatedFileManager };
+} else {
+    // ブラウザ環境での利用
+    if (typeof self !== 'undefined') {
+        self.AggregatedFileManager = AggregatedFileManager;
+    } else if (typeof window !== 'undefined') {
+        window.AggregatedFileManager = AggregatedFileManager;
+    }
+}

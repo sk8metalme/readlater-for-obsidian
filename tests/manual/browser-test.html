@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ReadLater for Obsidian - Claude API ブラウザテスト</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .input-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .input-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+        }
+        
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        button:hover {
+            background: #5a67d8;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: white;
+        }
+        
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .result.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .result.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .result.info {
+            background: #cce7ff;
+            color: #004085;
+            border: 1px solid #b3d7ff;
+        }
+        
+        .status {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .samples {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .sample-card {
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: #f9f9f9;
+            cursor: pointer;
+        }
+        
+        .sample-card:hover {
+            background: #e9ecef;
+        }
+        
+        .sample-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .sample-lang {
+            color: #666;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 ReadLater for Obsidian - Claude API ブラウザテスト</h1>
+        
+        <!-- API設定セクション -->
+        <div class="input-section">
+            <h2>🔑 API設定</h2>
+            <div class="input-group">
+                <label for="api-key">Claude API キー:</label>
+                <input type="password" id="api-key" placeholder="sk-..." />
+            </div>
+            <button onclick="initializeAPI()">API初期化</button>
+            <div id="api-status" class="status"></div>
+        </div>
+        
+        <!-- サンプル記事選択 -->
+        <div class="input-section">
+            <h2>📄 サンプル記事</h2>
+            <div class="samples" id="samples">
+                <!-- サンプル記事はJavaScriptで動的生成 -->
+            </div>
+        </div>
+        
+        <!-- 手動入力セクション -->
+        <div class="input-section">
+            <h2>✏️ 手動入力</h2>
+            <div class="input-group">
+                <label for="input-title">記事タイトル:</label>
+                <input type="text" id="input-title" placeholder="記事のタイトルを入力..." />
+            </div>
+            <div class="input-group">
+                <label for="input-content">記事内容:</label>
+                <textarea id="input-content" rows="6" placeholder="記事の内容を入力..."></textarea>
+            </div>
+        </div>
+        
+        <!-- テスト実行セクション -->
+        <div class="test-section">
+            <h2>🧪 テスト実行</h2>
+            <button onclick="testLanguageDetection()">言語検出テスト</button>
+            <button onclick="testTranslation()">翻訳テスト</button>
+            <button onclick="testSummarization()">要約テスト</button>
+            <button onclick="testFullWorkflow()">統合ワークフローテスト</button>
+            <button onclick="clearResults()">結果クリア</button>
+            
+            <div id="test-results"></div>
+        </div>
+    </div>
+
+    <!-- Claude API ライブラリの読み込み -->
+    <script src="../../src/lib/claude-api.js"></script>
+    
+    <script>
+        // グローバル変数
+        let claudeAPI = null;
+        let languageDetector = null;
+        let translationService = null;
+        let summaryService = null;
+        
+        // サンプル記事データ
+        const sampleArticles = {
+            english: {
+                title: "The Future of Artificial Intelligence",
+                content: `Artificial intelligence (AI) is rapidly transforming various sectors of our society. From healthcare to transportation, AI technologies are becoming increasingly sophisticated and widespread. Machine learning algorithms can now process vast amounts of data to identify patterns and make predictions with remarkable accuracy.
+
+The development of large language models has particularly revolutionized natural language processing. These models can understand, generate, and translate text in multiple languages, opening up new possibilities for global communication and collaboration.
+
+However, the rapid advancement of AI also raises important ethical and societal questions. Issues such as privacy, bias, and job displacement need to be carefully addressed as we move forward with AI integration.`,
+                lang: "English"
+            },
+            
+            japanese: {
+                title: "人工知能の未来",
+                content: `人工知能（AI）は私たちの社会の様々な分野を急速に変革しています。医療から輸送まで、AI技術はますます洗練され、広範囲に普及しています。機械学習アルゴリズムは、膨大な量のデータを処理してパターンを特定し、驚くべき精度で予測を行うことができるようになりました。
+
+特に大規模言語モデルの発展は、自然言語処理を革命的に変化させました。これらのモデルは複数の言語でテキストを理解、生成、翻訳することができ、グローバルなコミュニケーションと協力の新たな可能性を開いています。
+
+しかし、AIの急速な進歩は重要な倫理的・社会的問題も提起しています。プライバシー、偏見、雇用の置き換えなどの問題は、AI統合を進める際に慎重に対処する必要があります。`,
+                lang: "日本語"
+            },
+            
+            chinese: {
+                title: "人工智能的未来",
+                content: `人工智能（AI）正在快速改变我们社会的各个领域。从医疗保健到交通运输，人工智能技术正变得越来越复杂和广泛。机器学习算法现在可以处理大量数据来识别模式，并以惊人的准确度进行预测。
+
+大型语言模型的发展特别revolutionized了自然语言处理。这些模型可以理解、生成和翻译多种语言的文本，为全球沟通与合作开辟了新的可能性。
+
+然而，人工智能的快速发展也引发了重要的伦理和社会问题。在推进人工智能整合时，需要谨慎处理隐私、偏见和就业替代等问题。`,
+                lang: "中文"
+            }
+        };
+        
+        // 初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeLanguageDetector();
+            loadSampleArticles();
+        });
+        
+        // 言語検出器の初期化（APIキー不要）
+        function initializeLanguageDetector() {
+            try {
+                languageDetector = new LanguageDetector();
+                console.log('Language detector initialized');
+            } catch (error) {
+                console.error('Failed to initialize language detector:', error);
+            }
+        }
+        
+        // Claude APIの初期化
+        function initializeAPI() {
+            const apiKey = document.getElementById('api-key').value.trim();
+            const statusEl = document.getElementById('api-status');
+            
+            if (!apiKey) {
+                statusEl.textContent = '❌ APIキーを入力してください';
+                statusEl.className = 'status error';
+                return;
+            }
+            
+            try {
+                claudeAPI = new ClaudeAPI(apiKey);
+                translationService = new TranslationService(claudeAPI);
+                summaryService = new SummaryService(claudeAPI);
+                
+                statusEl.textContent = '✅ Claude API が初期化されました';
+                statusEl.className = 'status success';
+                
+                console.log('Claude API services initialized');
+                
+            } catch (error) {
+                statusEl.textContent = `❌ 初期化エラー: ${error.message}`;
+                statusEl.className = 'status error';
+                console.error('API initialization failed:', error);
+            }
+        }
+        
+        // サンプル記事の読み込み
+        function loadSampleArticles() {
+            const samplesEl = document.getElementById('samples');
+            
+            Object.entries(sampleArticles).forEach(([key, article]) => {
+                const card = document.createElement('div');
+                card.className = 'sample-card';
+                card.onclick = () => loadSample(article);
+                
+                card.innerHTML = `
+                    <div class="sample-title">${article.title}</div>
+                    <div class="sample-lang">${article.lang}</div>
+                    <div style="margin-top: 5px; font-size: 12px; color: #888;">
+                        ${article.content.substring(0, 100)}...
+                    </div>
+                `;
+                
+                samplesEl.appendChild(card);
+            });
+        }
+        
+        // サンプル記事の読み込み
+        function loadSample(article) {
+            document.getElementById('input-title').value = article.title;
+            document.getElementById('input-content').value = article.content;
+            addResult('info', `サンプル記事「${article.title}」を読み込みました`);
+        }
+        
+        // 現在の入力を取得
+        function getCurrentInput() {
+            return {
+                title: document.getElementById('input-title').value.trim(),
+                content: document.getElementById('input-content').value.trim()
+            };
+        }
+        
+        // 言語検出テスト
+        async function testLanguageDetection() {
+            const input = getCurrentInput();
+            
+            if (!input.content) {
+                addResult('error', '記事内容を入力してください');
+                return;
+            }
+            
+            if (!languageDetector) {
+                addResult('error', '言語検出器が初期化されていません');
+                return;
+            }
+            
+            try {
+                addResult('info', '言語検出中...');
+                
+                const result = await languageDetector.detectLanguage(input.content);
+                
+                const resultText = `言語検出結果:
+言語: ${result.language}
+信頼度: ${result.confidence.toFixed(3)}
+                
+記事タイトル: ${input.title}`;
+                
+                addResult('success', resultText);
+                
+            } catch (error) {
+                addResult('error', `言語検出エラー: ${error.message}`);
+            }
+        }
+        
+        // 翻訳テスト
+        async function testTranslation() {
+            const input = getCurrentInput();
+            
+            if (!input.content) {
+                addResult('error', '記事内容を入力してください');
+                return;
+            }
+            
+            if (!translationService) {
+                addResult('error', 'Claude APIが初期化されていません');
+                return;
+            }
+            
+            try {
+                addResult('info', '言語検出中...');
+                const langResult = await languageDetector.detectLanguage(input.content);
+                
+                if (langResult.language === 'ja') {
+                    addResult('info', '日本語記事のため翻訳をスキップします');
+                    return;
+                }
+                
+                addResult('info', `翻訳中... (${langResult.language} → ja)`);
+                
+                // タイトル翻訳
+                const titleResult = await translationService.translateText(
+                    input.title,
+                    langResult.language,
+                    'ja',
+                    { isTitle: true }
+                );
+                
+                // 内容翻訳（最初の500文字のみ）
+                const contentSample = input.content.substring(0, 500);
+                const contentResult = await translationService.translateText(
+                    contentSample,
+                    langResult.language,
+                    'ja'
+                );
+                
+                const resultText = `翻訳結果:
+                
+元タイトル: ${input.title}
+翻訳タイトル: ${titleResult.translatedText}
+
+元内容（抜粋）: ${contentSample}
+
+翻訳内容: ${contentResult.translatedText}`;
+                
+                addResult('success', resultText);
+                
+            } catch (error) {
+                addResult('error', `翻訳エラー: ${error.message}`);
+            }
+        }
+        
+        // 要約テスト
+        async function testSummarization() {
+            const input = getCurrentInput();
+            
+            if (!input.content) {
+                addResult('error', '記事内容を入力してください');
+                return;
+            }
+            
+            if (!summaryService) {
+                addResult('error', 'Claude APIが初期化されていません');
+                return;
+            }
+            
+            try {
+                addResult('info', '要約生成中...');
+                
+                const summaryResult = await summaryService.generateSummary(input.content, {
+                    style: 'structured',
+                    maxLength: 300
+                });
+                
+                if (summaryResult.skipped) {
+                    addResult('info', `要約スキップ: ${summaryResult.reason}`);
+                    return;
+                }
+                
+                addResult('info', 'キーワード抽出中...');
+                const keywordsResult = await summaryService.generateKeywords(input.content);
+                
+                const resultText = `要約結果:
+                
+記事タイトル: ${input.title}
+元文字数: ${input.content.length}文字
+要約文字数: ${summaryResult.summary.length}文字
+
+要約:
+${summaryResult.summary}
+
+キーワード: ${keywordsResult.keywords.join(', ')}`;
+                
+                addResult('success', resultText);
+                
+            } catch (error) {
+                addResult('error', `要約エラー: ${error.message}`);
+            }
+        }
+        
+        // 統合ワークフローテスト
+        async function testFullWorkflow() {
+            const input = getCurrentInput();
+            
+            if (!input.content) {
+                addResult('error', '記事内容を入力してください');
+                return;
+            }
+            
+            if (!claudeAPI) {
+                addResult('error', 'Claude APIが初期化されていません');
+                return;
+            }
+            
+            try {
+                addResult('info', '統合ワークフロー開始...');
+                
+                // 1. 言語検出
+                addResult('info', '1. 言語検出中...');
+                const langResult = await languageDetector.detectLanguage(input.content);
+                addResult('info', `   検出言語: ${langResult.language} (信頼度: ${langResult.confidence.toFixed(3)})`);
+                
+                let translatedTitle = input.title;
+                let translatedContent = input.content;
+                
+                // 2. 翻訳（必要な場合）
+                if (langResult.language !== 'ja') {
+                    addResult('info', '2. 翻訳中...');
+                    
+                    const titleResult = await translationService.translateText(
+                        input.title,
+                        langResult.language,
+                        'ja',
+                        { isTitle: true }
+                    );
+                    
+                    const contentResult = await translationService.translateText(
+                        input.content.substring(0, 800), // サンプル用に短縮
+                        langResult.language,
+                        'ja'
+                    );
+                    
+                    translatedTitle = titleResult.translatedText;
+                    translatedContent = contentResult.translatedText;
+                    
+                    addResult('info', `   翻訳完了: ${contentResult.translatedText.length}文字`);
+                } else {
+                    addResult('info', '2. 翻訳スキップ（日本語記事）');
+                }
+                
+                // 3. 要約生成
+                addResult('info', '3. 要約生成中...');
+                const summaryResult = await summaryService.generateSummary(translatedContent, {
+                    style: 'structured',
+                    maxLength: 250
+                });
+                
+                // 最終結果
+                const finalResult = `統合ワークフロー完了！
+
+📝 記事情報:
+タイトル: ${translatedTitle}
+${langResult.language !== 'ja' ? `原タイトル: ${input.title}` : ''}
+検出言語: ${langResult.language}
+翻訳済み: ${langResult.language !== 'ja' ? 'はい' : 'いいえ'}
+
+📄 要約:
+${summaryResult.skipped ? summaryResult.reason : summaryResult.summary}
+
+処理完了時刻: ${new Date().toLocaleString('ja-JP')}`;
+                
+                addResult('success', finalResult);
+                
+            } catch (error) {
+                addResult('error', `統合ワークフローエラー: ${error.message}`);
+            }
+        }
+        
+        // 結果表示
+        function addResult(type, text) {
+            const resultsEl = document.getElementById('test-results');
+            const resultEl = document.createElement('div');
+            resultEl.className = `result ${type}`;
+            resultEl.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+            resultsEl.appendChild(resultEl);
+            resultsEl.scrollTop = resultsEl.scrollHeight;
+        }
+        
+        // 結果クリア
+        function clearResults() {
+            document.getElementById('test-results').innerHTML = '';
+        }
+    </script>
+</body>
+</html>
