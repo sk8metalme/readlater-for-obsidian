@@ -32,8 +32,8 @@ class AggregatedFileManager {
             return defaultFileName;
         }
         
-        // 設定からファイル名を取得
-        let fileName = settings.fileName || defaultFileName;
+        // 設定からファイル名を取得（aggregatedFileNameを使用）
+        let fileName = settings.aggregatedFileName || defaultFileName;
         
         // 元のファイル名をチェックして、不正なパスが含まれている場合はデフォルトを使用
         if (fileName.includes('../') || fileName.includes('./') || fileName.includes('/') || fileName.includes('\\')) {
@@ -48,7 +48,15 @@ class AggregatedFileManager {
             fileName = defaultFileName;
         }
 
-        return fileName;
+        // 保存先フォルダと組み合わせてフルパスを生成
+        const obsidianPath = settings.obsidianPath || 'ReadLater';
+        if (obsidianPath.startsWith('/') || obsidianPath.match(/^[A-Za-z]:/)) {
+            // 絶対パスの場合
+            return `${obsidianPath}/${fileName}`;
+        } else {
+            // 相対パスの場合（Downloadsフォルダに保存）
+            return fileName;
+        }
     }
 
     /**
@@ -283,24 +291,10 @@ ${articleData.content || 'コンテンツが取得できませんでした。'}
                 updatedContent = updatedContent.replace(parsedFile.tableContent, newTableContent);
             }
 
-            // 記事詳細セクションに追加
-            let articleContent;
-            if (articleData.translatedContent && !articleData.translationSkipped) {
-                articleContent = `## 翻訳済み内容
-
-${articleData.translatedContent}
-
-<details>
-<summary>原文を表示</summary>
-
-${articleData.content || 'コンテンツが取得できませんでした。'}
-
-</details>`;
-            } else {
-                articleContent = `## 内容
+            // 記事詳細セクションに追加（翻訳機能削除により元のコンテンツのみ）
+            const articleContent = `## 内容
 
 ${articleData.content || 'コンテンツが取得できませんでした。'}`;
-            }
 
             const summarySection = articleData.summary ? `\n## 要約\n\n${articleData.summary}` : '';
 
@@ -354,26 +348,55 @@ ${articleContent}
     }
 
     /**
-     * ファイル読み込み（モック対応）
+     * ファイル読み込み（ネイティブメッセージング対応）
      * @param {string} filePath - ファイルパス
      * @returns {Promise<string>} ファイル内容
      */
     async readFile(filePath) {
-        // 実装は後でNative Messagingに接続
-        // テスト用のモックポイント
-        throw new Error('File not found');
+        try {
+            // ネイティブメッセージングでファイル読み込み
+            const response = await chrome.runtime.sendNativeMessage('com.readlater.claude_host', {
+                type: 'readFile',
+                filePath: filePath
+            });
+            
+            if (response && response.success) {
+                return response.content || '';
+            } else {
+                throw new Error(response?.error || 'ファイル読み込みに失敗しました');
+            }
+        } catch (error) {
+            // ファイルが存在しない場合は空文字列を返す
+            if (error.message.includes('ENOENT') || error.message.includes('not found')) {
+                return '';
+            }
+            throw error;
+        }
     }
 
     /**
-     * ファイル書き込み（モック対応）
+     * ファイル書き込み（ネイティブメッセージング対応）
      * @param {string} filePath - ファイルパス
      * @param {string} content - ファイル内容
      * @returns {Promise<Object>} 書き込み結果
      */
     async writeFile(filePath, content) {
-        // 実装は後でNative Messagingに接続
-        // テスト用のモックポイント
-        return { success: true };
+        try {
+            // ネイティブメッセージングでファイル書き込み
+            const response = await chrome.runtime.sendNativeMessage('com.readlater.claude_host', {
+                type: 'writeFile',
+                filePath: filePath,
+                content: content
+            });
+            
+            if (response && response.success) {
+                return { success: true, filePath: response.filePath };
+            } else {
+                throw new Error(response?.error || 'ファイル書き込みに失敗しました');
+            }
+        } catch (error) {
+            throw new Error(`ファイル書き込みエラー: ${error.message}`);
+        }
     }
 }
 

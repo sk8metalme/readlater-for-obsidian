@@ -113,19 +113,34 @@ async function handleMessage(msg) {
         return ok({ keywords });
       }
       case 'writeFile': {
-        const { baseDir, filename, content, encoding = 'utf8' } = msg;
-        if (!baseDir || !filename) return err('Missing baseDir or filename');
+        const { filePath, content, encoding = 'utf8' } = msg;
+        if (!filePath) return err('Missing filePath');
         if (typeof content !== 'string') return err('Invalid content');
         if (content.length > 10 * 1024 * 1024) return err('Content too large');
         const home = os.homedir();
-        const resolvedBase = path.resolve(baseDir);
-        if (!resolvedBase.startsWith(home)) return err('Base directory outside home is not allowed');
-        const safeName = sanitizeFilename(filename);
-        const outPath = path.join(resolvedBase, safeName);
-        await fsp.mkdir(path.dirname(outPath), { recursive: true });
-        await fsp.writeFile(outPath, content, { encoding });
-        const stats = await fsp.stat(outPath);
-        return ok({ filePath: outPath, bytes: stats.size });
+        const resolvedPath = path.resolve(filePath);
+        if (!resolvedPath.startsWith(home)) return err('File path outside home is not allowed');
+        await fsp.mkdir(path.dirname(resolvedPath), { recursive: true });
+        await fsp.writeFile(resolvedPath, content, { encoding });
+        const stats = await fsp.stat(resolvedPath);
+        return ok({ success: true, filePath: resolvedPath, bytes: stats.size });
+      }
+      case 'readFile': {
+        const { filePath, encoding = 'utf8' } = msg;
+        if (!filePath) return err('Missing filePath');
+        const home = os.homedir();
+        const resolvedPath = path.resolve(filePath);
+        if (!resolvedPath.startsWith(home)) return err('File path outside home is not allowed');
+        try {
+          const content = await fsp.readFile(resolvedPath, { encoding });
+          const stats = await fsp.stat(resolvedPath);
+          return ok({ success: true, content, filePath: resolvedPath, bytes: stats.size });
+        } catch (e) {
+          if (e.code === 'ENOENT') {
+            return err('File not found');
+          }
+          return err('Failed to read file: ' + e.message);
+        }
       }
       default:
         return err('Unknown type');
