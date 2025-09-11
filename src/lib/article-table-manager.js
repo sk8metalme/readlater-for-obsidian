@@ -21,6 +21,10 @@ class ArticleTableManager {
             },
             ...config
         };
+        
+        // エラーハンドラーの初期化
+        this.errorHandler = new (typeof ErrorHandler !== 'undefined' ? ErrorHandler : 
+            require('../utils/error-handler.js').ErrorHandler)();
     }
 
     /**
@@ -80,6 +84,54 @@ class ArticleTableManager {
         });
         
         return '| ' + cells.join(' | ') + ' |';
+    }
+
+    /**
+     * 複数記事からテーブルを生成
+     * @param {Array<Object>} articles - 記事配列
+     * @param {Array<string>} columns - カラム名配列
+     * @returns {string} 生成されたテーブル
+     */
+    generateTableFromArticles(articles, columns = null) {
+        try {
+            if (!Array.isArray(articles)) {
+                articles = [];
+            }
+
+            const header = this.generateTableHeader(columns);
+            
+            if (articles.length === 0) {
+                return header;
+            }
+
+            const rows = [];
+            for (const article of articles) {
+                try {
+                    const row = this.formatTableRow(article, columns);
+                    if (row && row.trim()) {
+                        rows.push(row);
+                    }
+                } catch (error) {
+                    // エラーが発生した記事はスキップして続行
+                    console.warn('ArticleTableManager: Skipping article due to formatting error:', error.message);
+                    this.errorHandler.handleError(error, { 
+                        operation: 'formatTableRow', 
+                        articleTitle: article?.title 
+                    });
+                }
+            }
+
+            return rows.length > 0 ? header + '\n' + rows.join('\n') : header;
+            
+        } catch (error) {
+            const errorResult = this.errorHandler.handleError(
+                new Error(`テーブル生成に失敗: ${error.message}`),
+                { operation: 'generateTableFromArticles', articlesCount: articles?.length || 0 }
+            );
+            
+            // エラー時でも最低限のテーブル構造を返す
+            return this.generateTableHeader(columns);
+        }
     }
 
     /**
@@ -186,6 +238,24 @@ class ArticleTableManager {
     }
 
     /**
+     * HTMLエスケープ処理
+     * @param {string} content - エスケープする内容
+     * @returns {string} エスケープされた内容
+     */
+    escapeHtml(content) {
+        if (!content || typeof content !== 'string') {
+            return '';
+        }
+
+        return content
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#x27;');
+    }
+
+    /**
      * Markdownテーブルセル用のエスケープ処理
      * @param {string} content - セル内容
      * @returns {string} エスケープされた内容
@@ -195,13 +265,28 @@ class ArticleTableManager {
             return '';
         }
 
-        return content
+        let processedContent = content;
+        
+        // HTMLエスケープ（設定で有効な場合）
+        if (this.config.escapeHtml) {
+            processedContent = this.escapeHtml(processedContent);
+        }
+
+        return processedContent
             // パイプ文字をエスケープ
             .replace(/\|/g, '\\|')
             // Markdownシンタックスをエスケープ
             .replace(/\*/g, '\\*')
             .replace(/`/g, '\\`')
             .replace(/_/g, '\\_')
+            .replace(/~/g, '\\~')
+            .replace(/#/g, '\\#')
+            .replace(/>/g, '\\>')
+            .replace(/\[/g, '\\[')
+            .replace(/\]/g, '\\]')
+            .replace(/\(/g, '\\(')
+            .replace(/\)/g, '\\)')
+            .replace(/!/g, '\\!')
             // 改行を空白に置換（テーブルセルでは改行不可）
             .replace(/\r?\n/g, ' ')
             // 連続する空白を単一の空白に
@@ -261,9 +346,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = { ArticleTableManager };
 } else {
     // ブラウザ環境での利用
-    if (typeof self !== 'undefined') {
-        self.ArticleTableManager = ArticleTableManager;
-    } else if (typeof window !== 'undefined') {
-        window.ArticleTableManager = ArticleTableManager;
-    }
+    const g = (typeof self !== 'undefined') ? self : 
+              (typeof window !== 'undefined') ? window : globalThis;
+    g.ArticleTableManager = ArticleTableManager;
 }
