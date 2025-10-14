@@ -11,6 +11,19 @@ const fsp = require('fs/promises');
 const path = require('path');
 const os = require('os');
 
+// Setup logging to file
+const LOG_FILE = path.join(os.homedir(), '.readlater-native-host.log');
+const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+const originalConsoleError = console.error;
+console.error = function(...args) {
+  const timestamp = new Date().toISOString();
+  const message = args.map(arg => 
+    typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+  ).join(' ');
+  logStream.write(`[${timestamp}] ${message}\n`);
+  originalConsoleError.apply(console, args);
+};
+
 // Ensure PATH includes common CLI locations (macOS/Linux GUI launches have limited PATH)
 (() => {
   const sep = process.platform === 'win32' ? ';' : ':';
@@ -84,6 +97,11 @@ const MAX_TEXT_LEN = 200000; // chars safeguard (~200 KB)
 async function handleMessage(msg) {
   if (!msg || typeof msg !== 'object') return err('Invalid message');
   const type = msg.type;
+  console.error(`[claude_host] Received message type: ${type}`, {
+    timestamp: new Date().toISOString(),
+    messageSize: JSON.stringify(msg).length
+  });
+  
   try {
     switch (type) {
       case 'check': {
@@ -160,18 +178,64 @@ async function handleMessage(msg) {
 
 function runClaude(prompt, timeoutMs = 240000) {
   return new Promise((resolve, reject) => {
+    const startTime = Date.now();
     const args = ['-p', '--model', 'sonnet', '--max-turns', '1', '--output-format', 'text', prompt];
     const cmd = getClaudeCmd();
+    
+    console.error(`[claude_host] runClaude START`, {
+      cmd,
+      promptLength: prompt.length,
+      timeoutMs,
+      timestamp: new Date().toISOString()
+    });
+    
     const p = spawn(cmd, args, { shell: false });
     let out = '', err = '';
-    p.stdout.on('data', d => (out += d.toString()));
-    p.stderr.on('data', d => (err += d.toString()));
-    p.on('error', (e) => reject(new Error('Failed to spawn claude: ' + e.message)));
+    let spawned = false;
+    
+    p.on('spawn', () => {
+      spawned = true;
+      const elapsed = Date.now() - startTime;
+      console.error(`[claude_host] Claude process spawned after ${elapsed}ms`);
+    });
+    
+    p.stdout.on('data', d => {
+      const chunk = d.toString();
+      out += chunk;
+      console.error(`[claude_host] stdout chunk: ${chunk.length} bytes, elapsed: ${Date.now() - startTime}ms`);
+    });
+    
+    p.stderr.on('data', d => {
+      const chunk = d.toString();
+      err += chunk;
+      console.error(`[claude_host] stderr: ${chunk}`);
+    });
+    
+    p.on('error', (e) => {
+      const elapsed = Date.now() - startTime;
+      console.error(`[claude_host] Process error after ${elapsed}ms:`, e.message);
+      reject(new Error('Failed to spawn claude: ' + e.message));
+    });
+    
     const to = setTimeout(() => {
+      const elapsed = Date.now() - startTime;
+      console.error(`[claude_host] TIMEOUT after ${elapsed}ms (configured: ${timeoutMs}ms)`, {
+        spawned,
+        outputLength: out.length,
+        errorLength: err.length
+      });
       try { p.kill('SIGTERM'); } catch (_) {}
     }, timeoutMs);
+    
     p.on('close', (code) => {
       clearTimeout(to);
+      const elapsed = Date.now() - startTime;
+      console.error(`[claude_host] Claude process closed after ${elapsed}ms`, {
+        code,
+        outputLength: out.length,
+        errorLength: err.length
+      });
+      
       if (code === 0 && out.trim().length > 0) return resolve(out.trim());
       reject(new Error(err || 'Claude CLI exited with code ' + code));
     });
@@ -213,13 +277,30 @@ function buildKeywordsPrompt(text, options) {
 }
 
 async function main() {
+  console.error(`[claude_host] Starting Native Host`, {
+    version: '1.0.0',
+    nodeVersion: process.version,
+    platform: process.platform,
+    logFile: LOG_FILE,
+    timestamp: new Date().toISOString()
+  });
+  
   // Loop to handle multiple messages until stdin closes
   while (true) {
     const msg = await readMessage();
-    if (!msg) break;
+    if (!msg) {
+      console.error('[claude_host] No message received, exiting...');
+      break;
+    }
     const res = await handleMessage(msg);
     writeMessage(res);
+    console.error('[claude_host] Response sent', {
+      ok: res.ok,
+      timestamp: new Date().toISOString()
+    });
   }
+  
+  console.error('[claude_host] Native Host shutting down');
 }
 
 main().catch((e) => {
