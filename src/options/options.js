@@ -14,6 +14,10 @@ const elements = {
     aggregatedSavingEnabled: document.getElementById('aggregated-saving-enabled'),
     aggregatedFileName: document.getElementById('aggregated-file-name'),
     
+    // Slack通知設定
+    slackNotificationEnabled: document.getElementById('slack-notification-enabled'),
+    slackWebhookUrl: document.getElementById('slack-webhook-url'),
+    
     // ボタン
     testClaudeConnection: document.getElementById('test-claude-connection'),
     testFileSave: document.getElementById('test-file-save'),
@@ -33,7 +37,9 @@ const defaultSettings = {
     summaryEnabled: true,
     fileNaming: 'date-title',
     aggregatedSavingEnabled: false,
-    aggregatedFileName: 'ReadLater_Articles.md'
+    aggregatedFileName: 'ReadLater_Articles.md',
+    slackNotificationEnabled: false,
+    slackWebhookUrl: ''
 };
 
 // ページ読み込み時の初期化
@@ -72,8 +78,15 @@ async function loadSettings() {
         elements.aggregatedSavingEnabled.checked = settings.aggregatedSavingEnabled === true;
         elements.aggregatedFileName.value = settings.aggregatedFileName || defaultSettings.aggregatedFileName;
         
+        // Slack通知設定の反映
+        elements.slackNotificationEnabled.checked = settings.slackNotificationEnabled === true;
+        elements.slackWebhookUrl.value = settings.slackWebhookUrl || defaultSettings.slackWebhookUrl;
+        
         // 集約保存設定のUI状態更新
         updateAggregatedSavingUI();
+        
+        // Slack通知設定のUI状態更新
+        updateSlackNotificationUI();
         
     } catch (error) {
         console.error('ReadLater for Obsidian: Error loading settings', error);
@@ -134,6 +147,10 @@ function setupEventListeners() {
     // 集約保存設定の変更時イベント
     elements.aggregatedSavingEnabled.addEventListener('change', updateAggregatedSavingUI);
     elements.aggregatedFileName.addEventListener('input', validateCurrentSettings);
+    
+    // Slack通知設定の変更時イベント
+    elements.slackNotificationEnabled.addEventListener('change', updateSlackNotificationUI);
+    elements.slackWebhookUrl.addEventListener('input', validateCurrentSettings);
 }
 
 /**
@@ -284,7 +301,9 @@ async function saveSettings() {
             summaryEnabled: elements.summaryEnabled.checked,
             fileNaming: elements.fileNaming.value,
             aggregatedSavingEnabled: elements.aggregatedSavingEnabled.checked,
-            aggregatedFileName: elements.aggregatedFileName.value.trim()
+            aggregatedFileName: elements.aggregatedFileName.value.trim(),
+            slackNotificationEnabled: elements.slackNotificationEnabled.checked,
+            slackWebhookUrl: elements.slackWebhookUrl.value.trim()
         };
         
         // 基本的な検証
@@ -299,6 +318,18 @@ async function saveSettings() {
         
         if (settings.aggregatedFileName && !settings.aggregatedFileName.endsWith('.md')) {
             settings.aggregatedFileName += '.md';
+        }
+        
+        // Slack通知設定の検証
+        if (settings.slackNotificationEnabled) {
+            if (!settings.slackWebhookUrl) {
+                throw new Error('Slack Webhook URLが入力されていません');
+            }
+            
+            // Webhook URLの形式チェック
+            if (!settings.slackWebhookUrl.startsWith('https://hooks.slack.com/')) {
+                throw new Error('Slack Webhook URLの形式が正しくありません');
+            }
         }
         
         // APIキーは不要（ネイティブメッセージング利用のため）
@@ -357,6 +388,8 @@ function validateCurrentSettings() {
     const path = elements.obsidianPath.value.trim();
     const aggregatedSavingEnabled = elements.aggregatedSavingEnabled.checked;
     const aggregatedFileName = elements.aggregatedFileName.value.trim();
+    const slackNotificationEnabled = elements.slackNotificationEnabled.checked;
+    const slackWebhookUrl = elements.slackWebhookUrl.value.trim();
     
     let isValid = true;
     let message = '';
@@ -371,6 +404,12 @@ function validateCurrentSettings() {
     if (aggregatedSavingEnabled && !aggregatedFileName) {
         isValid = false;
         message = '集約ファイル名は必須です';
+    }
+    
+    // Slack通知設定の確認
+    if (slackNotificationEnabled && !slackWebhookUrl) {
+        isValid = false;
+        message = 'Slack Webhook URLは必須です';
     }
     
     // 保存ボタンの有効/無効切り替え
@@ -410,11 +449,27 @@ function updateAggregatedSavingUI() {
     console.log('ReadLater for Obsidian: Aggregated saving UI updated', { enabled: isEnabled });
 }
 
+/**
+ * Slack通知設定UIの状態更新
+ */
+function updateSlackNotificationUI() {
+    const isEnabled = elements.slackNotificationEnabled.checked;
+    
+    // Slack Webhook URL入力フィールドの有効/無効切り替え
+    elements.slackWebhookUrl.disabled = !isEnabled;
+    
+    // 設定の検証を再実行
+    validateCurrentSettings();
+    
+    console.log('ReadLater for Obsidian: Slack notification UI updated', { enabled: isEnabled });
+}
+
 // デバッグ用関数の公開
 window.readlaterOptionsDebug = {
     loadSettings,
     saveSettings,
     resetSettings,
     validateCurrentSettings,
-    updateAggregatedSavingUI
+    updateAggregatedSavingUI,
+    updateSlackNotificationUI
 };

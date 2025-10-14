@@ -190,6 +190,9 @@ async function processExtractedArticle(articleData, settings) {
             showProgressNotification('ファイル保存', 95, 'Markdownファイルを保存しています...');
             const saveResult = await saveMarkdownFile(markdown, articleData.title, settings);
             showSuccessNotification(articleData.title, saveResult);
+            
+            // Slack通知の送信（個別保存モードのみ）
+            await sendSlackNotification(articleData.title, articleData.url, settings);
         }
         
     } catch (error) {
@@ -402,7 +405,9 @@ async function initializeDefaultSettings() {
             targetLanguage: 'ja',
             fileNaming: 'date-title',
             aggregatedSavingEnabled: false,
-            aggregatedFileName: 'ReadLater_Articles.md'
+            aggregatedFileName: 'ReadLater_Articles.md',
+            slackNotificationEnabled: false,
+            slackWebhookUrl: ''
         };
         
         await chrome.storage.sync.set({ readlaterSettings: defaultSettings });
@@ -546,19 +551,17 @@ async function saveToAggregatedFile(articleData, settings) {
  * @param {string} type - 通知タイプ (info, success, error)
  */
 function showNotification(title, message, type = 'info', options = {}) {
-    // small 1x1 transparent PNG data URL (fallback to avoid missing icon files)
-    const DATA_URL_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAALEwAACxMBAJqcGAAAABl0RVh0Q3JlYXRpb24gVGltZQAwOS8wOC8yNVmHkI0AAABmSURBVGje7c4xAQAgEMCw/2c4wC6o0qQ0o6KJ9mQHq3eQdWgAAPj0f7r4rJwAAUAAAIABAAACAAQAAAgAEAAAIABAAACAAQAAAgAEAAAIABAAACAAQAAAgAEAAAIABAAADEB8QCLjzB9Yf0XAAAAAElFTkSuQmCC';
-    const iconMap = { info: DATA_URL_ICON, success: DATA_URL_ICON, error: DATA_URL_ICON, warning: DATA_URL_ICON };
-    
     const notificationOptions = {
         type: 'basic',
-        iconUrl: iconMap[type] || iconMap.info,
         title: `ReadLater for Obsidian: ${title}`,
         message: message,
         priority: type === 'error' ? 2 : (type === 'warning' ? 1 : 0),
         requireInteraction: type === 'error' || options.requireInteraction || false,
         ...options
     };
+    
+    // アイコンは指定しない（デフォルトを使用）
+    // Service Workerではdata URLが問題を起こす可能性があるため
     
     try {
         // Try Chrome notifications API (callback style)
@@ -593,9 +596,11 @@ function tryShowSWNotification(title, message) {
             self.registration.showNotification(`ReadLater for Obsidian: ${title}` , {
                 body: message,
                 icon: undefined,
+            }).catch(e => {
+                console.warn('ReadLater for Obsidian: SW showNotification failed', e);
             });
         } catch (e) {
-            console.warn('ReadLater for Obsidian: SW showNotification failed', e);
+            console.warn('ReadLater for Obsidian: SW showNotification threw', e);
         }
     }
 }
@@ -668,6 +673,135 @@ function formatFileSize(bytes) {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+/**
+ * Slackに通知を送信
+ * @param {string} title - 記事タイトル
+ * @param {string} url - 記事URL
+ * @param {Object} settings - ユーザー設定
+ * @returns {Promise<void>}
+ */
+async function sendSlackNotification(title, url, settings) {
+    // Slack通知が無効またはWebhook URLが未設定の場合はスキップ
+    if (!settings.slackNotificationEnabled || !settings.slackWebhookUrl) {
+        console.log('ReadLater for Obsidian: Slack notification skipped (disabled or no webhook URL)');
+        return;
+    }
+    
+    try {
+        console.log('ReadLater for Obsidian: Sending Slack notification', { 
+            title: title.substring(0, 50), 
+            url: url.substring(0, 50),
+            webhookUrl: settings.slackWebhookUrl.substring(0, 50) + '...'
+        });
+        
+        // シンプルなテキストメッセージ（フォールバック用）
+        const simpleMessage = {
+            text: `📖 記事を保存しました\n\n*タイトル:* ${title}\n*URL:* ${url}\n*保存日時:* ${new Date().toLocaleString('ja-JP')}`
+        };
+        
+        // リッチなBlock Kit形式のメッセージ
+        const richMessage = {
+            text: '📖 記事を保存しました',
+            blocks: [
+                {
+                    type: 'header',
+                    text: {
+                        type: 'plain_text',
+                        text: '📖 記事を保存しました',
+                        emoji: true
+                    }
+                },
+                {
+                    type: 'section',
+                    fields: [
+                        {
+                            type: 'mrkdwn',
+                            text: `*タイトル:*\n${title}`
+                        },
+                        {
+                            type: 'mrkdwn',
+                            text: `*URL:*\n<${url}|リンクを開く>`
+                        }
+                    ]
+                },
+                {
+                    type: 'context',
+                    elements: [
+                        {
+                            type: 'mrkdwn',
+                            text: `保存日時: ${new Date().toLocaleString('ja-JP')}`
+                        }
+                    ]
+                }
+            ]
+        };
+        
+        // まずシンプルな形式で試す
+        let message = simpleMessage;
+        let useSimple = true;
+        
+        // 設定でリッチ形式が有効な場合はBlock Kitを使用
+        // （今後の拡張用：settings.slackUseRichFormat が true の場合）
+        if (settings.slackUseRichFormat === true) {
+            message = richMessage;
+            useSimple = false;
+        }
+        
+        console.log('ReadLater for Obsidian: Sending Slack message', { 
+            format: useSimple ? 'simple' : 'rich',
+            messageLength: JSON.stringify(message).length 
+        });
+        
+        // Slack Webhook URLにPOSTリクエストを送信
+        const response = await fetch(settings.slackWebhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(message)
+        });
+        
+        // レスポンスの詳細を取得
+        const responseText = await response.text();
+        
+        if (!response.ok) {
+            console.error('ReadLater for Obsidian: Slack API error details', {
+                status: response.status,
+                statusText: response.statusText,
+                responseBody: responseText,
+                webhookUrl: settings.slackWebhookUrl.substring(0, 50) + '...'
+            });
+            
+            // エラーメッセージの詳細化
+            let errorMessage = `Slack API returned ${response.status}`;
+            if (response.status === 403) {
+                errorMessage += ' (Forbidden): Webhook URLが無効か、権限がありません。Webhook URLを再確認してください。';
+            } else if (response.status === 404) {
+                errorMessage += ' (Not Found): Webhook URLが見つかりません。URLを確認してください。';
+            } else if (response.status === 400) {
+                errorMessage += ' (Bad Request): メッセージの形式が正しくありません。';
+            }
+            
+            throw new Error(errorMessage);
+        }
+        
+        console.log('ReadLater for Obsidian: Slack notification sent successfully', {
+            status: response.status,
+            responseBody: responseText
+        });
+        
+    } catch (error) {
+        // Slack通知の失敗は記事保存処理に影響を与えない
+        console.error('ReadLater for Obsidian: Failed to send Slack notification', error);
+        console.error('ReadLater for Obsidian: Error details', {
+            errorName: error.name,
+            errorMessage: error.message,
+            errorStack: error.stack
+        });
+        console.warn('ReadLater for Obsidian: Article saved successfully despite Slack notification failure');
+    }
 }
 
 /**

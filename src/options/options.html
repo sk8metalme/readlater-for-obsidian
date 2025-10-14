@@ -139,6 +139,55 @@
                 </div>
             </section>
 
+            <!-- Slack通知設定セクション -->
+            <section class="settings-section">
+                <h2>💬 Slack通知設定</h2>
+                
+                <div class="setting-group">
+                    <label class="setting-label">🔔 Slack通知</label>
+                    
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="slack-notification-enabled">
+                            <span class="checkmark"></span>
+                            Slack通知を有効にする
+                        </label>
+                        <div class="setting-help-small">
+                            記事保存時にSlackに通知を送信します（個別保存モードのみ）
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <label for="slack-webhook-url" class="setting-label">
+                        🔗 Slack Webhook URL
+                        <span class="conditional-required">*</span>
+                    </label>
+                    <input 
+                        type="text" 
+                        id="slack-webhook-url" 
+                        class="setting-input" 
+                        placeholder="例: https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+                        disabled
+                    >
+                    <div class="setting-help">
+                        Slack通知を有効にする場合、Incoming Webhook URLを設定してください。<br>
+                        <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener">Slack Webhook URLの取得方法はこちら</a>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <div class="info-box">
+                        <h4>📋 通知内容</h4>
+                        <p>以下の情報がSlackに送信されます：</p>
+                        <ul>
+                            <li>記事のタイトル</li>
+                            <li>記事のURL</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
             <!-- 接続テストセクション -->
             <section class="settings-section">
                 <h2>🔍 接続テスト</h2>
