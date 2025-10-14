@@ -126,7 +126,7 @@ async function handleMessage(msg) {
         if (!text || typeof text !== 'string') return err('Empty text');
         const safeText = text.length > MAX_TEXT_LEN ? (text.slice(0, MAX_TEXT_LEN) + '\n[TRUNCATED]\n') : text;
         const prompt = buildSummaryPrompt(safeText, options);
-        const out = await runClaude(prompt, options.timeoutMs || 120000);
+        const out = await runClaude(prompt, options.timeoutMs || 60000);  // 60s for faster debugging
         return ok({ summary: out });
       }
       case 'keywords': {
@@ -176,20 +176,37 @@ async function handleMessage(msg) {
   }
 }
 
-function runClaude(prompt, timeoutMs = 240000) {
+function runClaude(prompt, timeoutMs = 60000) {
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
-    const args = ['-p', '--model', 'sonnet', '--max-turns', '1', '--output-format', 'text', prompt];
+    const args = [
+      '-p', 
+      '--model', 'sonnet', 
+      '--max-turns', '1', 
+      '--output-format', 'text',
+      '--dangerously-skip-permissions',  // Skip all permission checks for non-interactive execution
+      prompt
+    ];
     const cmd = getClaudeCmd();
     
     console.error(`[claude_host] runClaude START`, {
       cmd,
+      args: args.filter(a => a !== prompt), // Don't log the full prompt
       promptLength: prompt.length,
       timeoutMs,
       timestamp: new Date().toISOString()
     });
     
-    const p = spawn(cmd, args, { shell: false });
+    const p = spawn(cmd, args, { 
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],  // Explicitly close stdin, pipe stdout/stderr
+      env: {
+        ...process.env,
+        CI: 'true',  // Some CLIs detect CI environment and disable interactive features
+        FORCE_COLOR: '0',  // Disable color codes
+        NO_COLOR: '1'  // Disable color codes
+      }
+    });
     let out = '', err = '';
     let spawned = false;
     

@@ -985,7 +985,7 @@ async function processWithNativeClaude(articleData, settings) {
                 });
                 
                 const combined = partials.join('\n\n');
-                const reduced = await bridge.summarize(combined.slice(0, 12000), { style: settings.summaryStyle || 'structured', maxLength: settings.summaryLength || 500, timeoutMs: 240000 });
+                const reduced = await bridge.summarize(combined.slice(0, 12000), { style: settings.summaryStyle || 'structured', maxLength: settings.summaryLength || 500, timeoutMs: 90000 });
                 finalSummary = reduced.summary || reduced.data || '';
                 
                 console.log('ReadLater for Obsidian: Final summary generated', {
@@ -996,7 +996,7 @@ async function processWithNativeClaude(articleData, settings) {
                     contentLength: base.length
                 });
                 
-                const summary = await bridge.summarize(base, { style: settings.summaryStyle || 'structured', maxLength: settings.summaryLength || 500, timeoutMs: 240000 });
+                const summary = await bridge.summarize(base, { style: settings.summaryStyle || 'structured', maxLength: settings.summaryLength || 500, timeoutMs: 90000 });
                 finalSummary = summary.summary || summary.data || '';
                 
                 console.log('ReadLater for Obsidian: Summary generated', {
