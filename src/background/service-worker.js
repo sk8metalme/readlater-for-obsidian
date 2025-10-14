@@ -924,36 +924,93 @@ async function processWithNativeClaude(articleData, settings) {
      // Summarization (hierarchical for stability)
      if (settings.summaryEnabled) {
          try {
+             console.log('ReadLater for Obsidian: Starting summarization', {
+                 contentLength: articleData.content?.length || 0,
+                 language: result.detectedLanguage
+             });
+             
              const base = articleData.content || ''; // 元のコンテンツを使用（翻訳済みコンテンツは使用しない）
+            
+            if (base.length === 0) {
+                console.warn('ReadLater for Obsidian: No content to summarize');
+                throw new Error('Empty content for summarization');
+            }
+            
             const CHUNK_SIZE_SUM = 2000; // smaller chunks for stability
             let finalSummary = '';
 
             if (base.length > CHUNK_SIZE_SUM) {
+                console.log('ReadLater for Obsidian: Using chunked summarization', {
+                    totalLength: base.length,
+                    chunkSize: CHUNK_SIZE_SUM
+                });
+                
                 const chunks = chunkText(base, CHUNK_SIZE_SUM);
+                console.log(`ReadLater for Obsidian: Processing ${chunks.length} chunks`);
+                
                 const partials = [];
                 let i = 0;
                 for (const ch of chunks) {
                     i++;
+                    console.log(`ReadLater for Obsidian: Summarizing chunk ${i}/${chunks.length}`, {
+                        chunkLength: ch.length
+                    });
                     showProgressNotification('AI要約', Math.min(75 + Math.floor((i / chunks.length) * 10), 85), `部分要約 ${i}/${chunks.length}`);
+                    
                     const part = await bridge.summarize(ch, { style: 'bullet', maxLength: 280, timeoutMs: 180000 });
+                    console.log(`ReadLater for Obsidian: Chunk ${i} summarized`, {
+                        summaryLength: (part.summary || part.data || '').length
+                    });
                     partials.push(part.summary || part.data || '');
                 }
+                
+                console.log('ReadLater for Obsidian: Combining partial summaries', {
+                    partialCount: partials.length,
+                    combinedLength: partials.join('\n\n').length
+                });
+                
                 const combined = partials.join('\n\n');
                 const reduced = await bridge.summarize(combined.slice(0, 12000), { style: settings.summaryStyle || 'structured', maxLength: settings.summaryLength || 500, timeoutMs: 240000 });
                 finalSummary = reduced.summary || reduced.data || '';
+                
+                console.log('ReadLater for Obsidian: Final summary generated', {
+                    finalLength: finalSummary.length
+                });
             } else {
+                console.log('ReadLater for Obsidian: Using single-pass summarization', {
+                    contentLength: base.length
+                });
+                
                 const summary = await bridge.summarize(base, { style: settings.summaryStyle || 'structured', maxLength: settings.summaryLength || 500, timeoutMs: 240000 });
                 finalSummary = summary.summary || summary.data || '';
+                
+                console.log('ReadLater for Obsidian: Summary generated', {
+                    summaryLength: finalSummary.length
+                });
             }
 
             result.summary = finalSummary;
             result.summarySkipped = false;
+            
+            // キーワード抽出
             if (!result.keywords) {
+                console.log('ReadLater for Obsidian: Extracting keywords');
                 const k = await bridge.keywords(base.slice(0, 12000), { maxKeywords: 8, timeoutMs: 90000 });
                 result.keywords = k.keywords || k.data || [];
+                console.log('ReadLater for Obsidian: Keywords extracted', {
+                    keywordCount: result.keywords.length,
+                    keywords: result.keywords
+                });
             }
+            
+            console.log('ReadLater for Obsidian: Summarization completed successfully');
         } catch (e) {
-            console.warn('Summarization via native host failed', e);
+            console.error('ReadLater for Obsidian: Summarization via native host failed', e);
+            console.error('ReadLater for Obsidian: Error details', {
+                errorName: e.name,
+                errorMessage: e.message,
+                errorStack: e.stack
+            });
             result.summaryError = e.message;
              // Local heuristic fallback summary (no AI)
              try {

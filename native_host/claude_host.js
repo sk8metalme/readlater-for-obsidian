@@ -37,11 +37,18 @@ function readMessage() {
       if (!h) return resolve(null);
       h.copy(header);
       const len = header.readUInt32LE(0);
-      if (len === 0) return resolve(null);
+      
+      // Validate message length (max 10MB for safety)
+      const MAX_MESSAGE_SIZE = 10 * 1024 * 1024; // 10MB
+      if (len === 0 || len > MAX_MESSAGE_SIZE) {
+        console.error(`[claude_host] Invalid message length: ${len}`);
+        return resolve(null);
+      }
+      
       const chunks = [];
       let remaining = len;
       function readChunk() {
-        const chunk = process.stdin.read(remaining);
+        const chunk = process.stdin.read(Math.min(remaining, 65536)); // Read in smaller chunks
         if (!chunk) return process.stdin.once('readable', readChunk);
         chunks.push(chunk);
         remaining -= chunk.length;
@@ -51,6 +58,7 @@ function readMessage() {
             const msg = JSON.parse(buf.toString('utf8'));
             resolve(msg);
           } catch (e) {
+            console.error(`[claude_host] JSON parse error:`, e.message);
             resolve(null);
           }
         }
