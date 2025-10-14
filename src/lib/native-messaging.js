@@ -36,6 +36,13 @@
     }
 
     async summarize(text, options = {}) {
+      console.log('[NativeClaudeBridge] Summarize request', {
+        textLength: text.length,
+        style: options.style || 'structured',
+        maxLength: options.maxLength || 500,
+        timeoutMs: options.timeoutMs || this.timeoutMs
+      });
+      
       return this.#requireOk(
         this.#send(
           { type: 'summarize', text, options: { style: options.style || 'structured', maxLength: options.maxLength || 500, timeoutMs: typeof options.timeoutMs === 'number' ? options.timeoutMs : undefined } },
@@ -58,9 +65,19 @@
       return new Promise((resolve) => {
         let done = false;
         const useTimeout = typeof timeoutOverrideMs === 'number' ? timeoutOverrideMs : this.timeoutMs;
+        const startTime = Date.now();
+        
+        console.log('[NativeClaudeBridge] Sending message', {
+          type: message.type,
+          timeout: useTimeout,
+          messageSize: JSON.stringify(message).length
+        });
+        
         const timer = setTimeout(() => {
           if (done) return;
           done = true;
+          const elapsed = Date.now() - startTime;
+          console.error('[NativeClaudeBridge] Timeout after', elapsed, 'ms (configured:', useTimeout, 'ms)');
           resolve({ ok: false, error: 'Native host timeout' });
         }, useTimeout);
 
@@ -68,14 +85,24 @@
           chrome.runtime.sendNativeMessage(this.hostName, message, (response) => {
             if (done) return;
             clearTimeout(timer);
+            const elapsed = Date.now() - startTime;
+            
             if (chrome.runtime.lastError) {
+              console.error('[NativeClaudeBridge] Chrome runtime error after', elapsed, 'ms:', chrome.runtime.lastError.message);
               return resolve({ ok: false, error: chrome.runtime.lastError.message });
             }
+            
+            console.log('[NativeClaudeBridge] Received response after', elapsed, 'ms', {
+              ok: response?.ok,
+              hasData: !!(response?.data || response?.summary || response?.translatedText)
+            });
+            
             resolve(response || { ok: false, error: 'Empty response' });
           });
         } catch (e) {
           if (done) return;
           clearTimeout(timer);
+          console.error('[NativeClaudeBridge] Exception:', e.message);
           resolve({ ok: false, error: e.message });
         }
       });

@@ -262,11 +262,20 @@ async function saveMarkdownFile(markdown, title, settings) {
                 const bridge = new NativeClaudeBridge();
                 const status = await bridge.checkStatus();
                 if (status.available) {
+                    // Native Hostは filePath（完全パス）を期待する
+                    // settings.obsidianPath の末尾のスラッシュを正規化
+                    const basePath = settings.obsidianPath.replace(/\/+$/, '');
+                    const fullPath = `${basePath}/${filename}`;
+                    
+                    console.log('ReadLater for Obsidian: Saving via Native Host', {
+                        fullPath,
+                        contentLength: markdown.length
+                    });
+                    
                     const res = await new Promise((resolveNative, rejectNative) => {
                         chrome.runtime.sendNativeMessage('com.readlater.claude_host', {
                             type: 'writeFile',
-                            baseDir: settings.obsidianPath,
-                            filename,
+                            filePath: fullPath,
                             content: markdown,
                             encoding: 'utf8'
                         }, (response) => {
@@ -279,11 +288,17 @@ async function saveMarkdownFile(markdown, title, settings) {
                             resolveNative(response);
                         });
                     });
+                    
+                    console.log('ReadLater for Obsidian: Native Host write successful', {
+                        filePath: res.filePath,
+                        bytes: res.bytes
+                    });
+                    
                     return {
                         success: true,
                         downloadId: null,
                         filename: res.filePath,
-                        fileSize: markdown.length,
+                        fileSize: res.bytes || markdown.length,
                         savedAt: new Date().toISOString()
                     };
                 }
