@@ -192,7 +192,9 @@ async function processExtractedArticle(articleData, settings) {
             showSuccessNotification(articleData.title, saveResult);
             
             // Slack通知の送信（個別保存モードのみ）
-            await sendSlackNotification(articleData.title, articleData.url, settings);
+            // 要約が生成されていれば含める
+            const summaryForSlack = articleData.summary || '';
+            await sendSlackNotification(articleData.title, articleData.url, summaryForSlack, settings);
         }
         
     } catch (error) {
@@ -694,10 +696,11 @@ function formatFileSize(bytes) {
  * Slackに通知を送信
  * @param {string} title - 記事タイトル
  * @param {string} url - 記事URL
+ * @param {string} summary - 記事要約（オプション）
  * @param {Object} settings - ユーザー設定
  * @returns {Promise<void>}
  */
-async function sendSlackNotification(title, url, settings) {
+async function sendSlackNotification(title, url, summary, settings) {
     // Slack通知が無効またはWebhook URLが未設定の場合はスキップ
     if (!settings.slackNotificationEnabled || !settings.slackWebhookUrl) {
         console.log('ReadLater for Obsidian: Slack notification skipped (disabled or no webhook URL)');
@@ -708,49 +711,87 @@ async function sendSlackNotification(title, url, settings) {
         console.log('ReadLater for Obsidian: Sending Slack notification', { 
             title: title.substring(0, 50), 
             url: url.substring(0, 50),
+            hasSummary: !!summary,
+            summaryLength: summary ? summary.length : 0,
             webhookUrl: settings.slackWebhookUrl.substring(0, 50) + '...'
         });
         
+        // 要約テキストを整形（Markdown見出しを除去し、Slackに適した形式に）
+        let summaryText = '';
+        if (summary) {
+            summaryText = summary
+                .replace(/^#+\s+/gm, '*')   // 見出し（# など）を太字記号に変換
+                .replace(/\*\*/g, '*')      // **太字** を *太字* に変換（Slackスタイル）
+                .replace(/\n{3,}/g, '\n\n') // 3つ以上の連続改行を2つに
+                .trim();
+            
+            // 長すぎる場合は切り詰める（Slackの制限対策: 3000文字まで）
+            if (summaryText.length > 600) {
+                summaryText = summaryText.substring(0, 597) + '...';
+            }
+        }
+        
         // シンプルなテキストメッセージ（フォールバック用）
+        let simpleMessageText = `📖 記事を保存しました\n\n*タイトル:* ${title}\n*URL:* ${url}`;
+        if (summaryText) {
+            simpleMessageText += `\n\n*要約:*\n${summaryText}`;
+        }
+        simpleMessageText += `\n\n_保存日時: ${new Date().toLocaleString('ja-JP')}_`;
+        
         const simpleMessage = {
-            text: `📖 記事を保存しました\n\n*タイトル:* ${title}\n*URL:* ${url}\n*保存日時:* ${new Date().toLocaleString('ja-JP')}`
+            text: simpleMessageText
         };
         
         // リッチなBlock Kit形式のメッセージ
-        const richMessage = {
-            text: '📖 記事を保存しました',
-            blocks: [
-                {
-                    type: 'header',
-                    text: {
-                        type: 'plain_text',
-                        text: '📖 記事を保存しました',
-                        emoji: true
+        const richBlocks = [
+            {
+                type: 'header',
+                text: {
+                    type: 'plain_text',
+                    text: '📖 記事を保存しました',
+                    emoji: true
+                }
+            },
+            {
+                type: 'section',
+                fields: [
+                    {
+                        type: 'mrkdwn',
+                        text: `*タイトル:*\n${title}`
+                    },
+                    {
+                        type: 'mrkdwn',
+                        text: `*URL:*\n<${url}|リンクを開く>`
                     }
-                },
+                ]
+            }
+        ];
+        
+        // 要約がある場合は追加
+        if (summaryText) {
+            richBlocks.push({
+                type: 'section',
+                text: {
+                    type: 'mrkdwn',
+                    text: `*要約:*\n${summaryText}`
+                }
+            });
+        }
+        
+        // 保存日時を追加
+        richBlocks.push({
+            type: 'context',
+            elements: [
                 {
-                    type: 'section',
-                    fields: [
-                        {
-                            type: 'mrkdwn',
-                            text: `*タイトル:*\n${title}`
-                        },
-                        {
-                            type: 'mrkdwn',
-                            text: `*URL:*\n<${url}|リンクを開く>`
-                        }
-                    ]
-                },
-                {
-                    type: 'context',
-                    elements: [
-                        {
-                            type: 'mrkdwn',
-                            text: `保存日時: ${new Date().toLocaleString('ja-JP')}`
-                        }
-                    ]
+                    type: 'mrkdwn',
+                    text: `保存日時: ${new Date().toLocaleString('ja-JP')}`
                 }
             ]
+        });
+        
+        const richMessage = {
+            text: '📖 記事を保存しました',
+            blocks: richBlocks
         };
         
         // まずシンプルな形式で試す
