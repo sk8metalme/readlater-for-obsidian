@@ -2,14 +2,92 @@
 // ローカルのClaude CLIとの連携、翻訳・要約機能を提供
 
 /**
+ * カスタム例外クラス
+ */
+class ClaudeCLIError extends Error {
+    constructor(message, details = {}) {
+        super(message);
+        this.name = 'ClaudeCLIError';
+        this.details = details;
+        this.timestamp = new Date().toISOString();
+    }
+}
+
+class ClaudeCLITimeoutError extends ClaudeCLIError {
+    constructor(timeout, details = {}) {
+        super(`Claude CLI command timed out after ${timeout}ms`, details);
+        this.name = 'ClaudeCLITimeoutError';
+        this.timeout = timeout;
+    }
+}
+
+class ClaudeCLIProcessError extends ClaudeCLIError {
+    constructor(message, code, stderr, details = {}) {
+        super(message, details);
+        this.name = 'ClaudeCLIProcessError';
+        this.exitCode = code;
+        this.stderr = stderr;
+    }
+}
+
+class ClaudeCLINotFoundError extends ClaudeCLIError {
+    constructor(details = {}) {
+        super('Claude CLI not found. Please install Claude CLI first.', details);
+        this.name = 'ClaudeCLINotFoundError';
+    }
+}
+
+/**
+ * リトライ設定クラス
+ */
+class RetryConfig {
+    constructor(options = {}) {
+        this.maxAttempts = options.maxAttempts || 3;
+        this.initialDelay = options.initialDelay || 4000; // 4秒
+        this.maxDelay = options.maxDelay || 10000; // 10秒
+        this.multiplier = options.multiplier || 2;
+    }
+    
+    shouldRetry(error, attemptNumber) {
+        if (attemptNumber >= this.maxAttempts) return false;
+        
+        // エラータイプでリトライ判断
+        if (error instanceof ClaudeCLINotFoundError) return false;
+        if (error instanceof ClaudeCLITimeoutError) return true;
+        if (error instanceof ClaudeCLIProcessError) return true;
+        
+        // Node.js エラーコード
+        const retryableErrors = ['ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND'];
+        return retryableErrors.includes(error.code);
+    }
+    
+    getDelay(attemptNumber) {
+        const delay = this.initialDelay * Math.pow(this.multiplier, attemptNumber - 1);
+        return Math.min(delay, this.maxDelay);
+    }
+}
+
+/**
  * Claude CLI の主要インターフェース
  * ローカルのClaude CLIコマンドを使用（APIキー不要）
  */
 class ClaudeCLI {
+    // クラスレベルの状態（全インスタンスで共有）
+    static _lastRequestTime = 0;
+    static _requestLock = Promise.resolve();
+    
     constructor(options = {}) {
         this.model = options.model || 'sonnet';
         this.maxTurns = options.maxTurns || 1;
-        this.timeout = options.timeout || 30000; // 30秒
+        this.timeout = options.timeout || 120000; // 120秒（nookと同じ）
+        this.skipPermissions = options.skipPermissions !== false; // デフォルトでtrue
+        this.minRequestInterval = options.minRequestInterval || 2000; // 2秒
+        this.maxPromptChars = options.maxPromptChars || 100000; // 10万文字
+        this.retryConfig = new RetryConfig(options.retry || {});
+        
+        // セッション履歴管理
+        this.sessionHistory = [];
+        this.maxHistoryMessages = options.maxHistoryMessages || 4; // 直近2往復
         
         // Claude CLIの実行可能性をチェック
         this.isAvailable = this.checkClaudeAvailability();
@@ -29,8 +107,8 @@ class ClaudeCLI {
             
             // Node.js環境でのみチェック
             const { execSync } = require('child_process');
-            execSync('claude --version', { stdio: 'ignore', timeout: 5000 });
-            console.log('ClaudeCLI: Claude CLI is available');
+            const version = execSync('claude --version', { stdio: 'pipe', timeout: 5000 }).toString().trim();
+            console.log('ClaudeCLI: Claude CLI is available', { version });
             return true;
         } catch (error) {
             console.warn('ClaudeCLI: Claude CLI not available:', error.message);
@@ -39,17 +117,159 @@ class ClaudeCLI {
     }
     
     /**
-     * Claude CLIにクエリを送信
+     * レート制限制御：前のリクエストから十分な時間が経過するまで待機
+     */
+    async throttleIfNeeded() {
+        if (!this.minRequestInterval || this.minRequestInterval <= 0) {
+            return;
+        }
+        
+        const now = Date.now();
+        const elapsed = now - ClaudeCLI._lastRequestTime;
+        const waitTime = this.minRequestInterval - elapsed;
+        
+        if (waitTime > 0) {
+            console.log(`ClaudeCLI: Throttling request, waiting ${waitTime}ms`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+        
+        ClaudeCLI._lastRequestTime = Date.now();
+    }
+    
+    /**
+     * 排他制御：同時リクエストを防ぐ
+     */
+    async acquireLock() {
+        // 前のリクエストが完了するまで待機
+        await ClaudeCLI._requestLock;
+        
+        let releaseLock;
+        ClaudeCLI._requestLock = new Promise(resolve => {
+            releaseLock = resolve;
+        });
+        
+        return releaseLock;
+    }
+    
+    /**
+     * プロンプトの文字数制限を適用
+     */
+    enforcePromptLimit(prompt, systemInstruction = null) {
+        if (!this.maxPromptChars) {
+            return { prompt, systemInstruction };
+        }
+        
+        let prefixLength = 0;
+        if (systemInstruction) {
+            prefixLength = systemInstruction.length + 20; // "System: \n\nUser: ".length
+        }
+        
+        const availableForPrompt = Math.max(this.maxPromptChars - prefixLength, 0);
+        
+        if (availableForPrompt === 0) {
+            return {
+                prompt: '[入力テキストは長すぎるため全体を送信できませんでした]'.slice(0, this.maxPromptChars),
+                systemInstruction
+            };
+        }
+        
+        if (prompt.length <= availableForPrompt) {
+            return { prompt, systemInstruction };
+        }
+        
+        const truncatedPrompt = prompt.slice(0, availableForPrompt).trimEnd() + 
+            '\n\n[入力テキストは制限により途中までで送信されています]';
+        
+        console.warn(`ClaudeCLI: Prompt truncated from ${prompt.length} to ${truncatedPrompt.length} chars`);
+        
+        return { prompt: truncatedPrompt, systemInstruction };
+    }
+    
+    /**
+     * エラーログの記録
+     */
+    logError(error, context = {}) {
+        console.error('ClaudeCLI Error:', {
+            errorType: error.name,
+            message: error.message,
+            timestamp: error.timestamp || new Date().toISOString(),
+            context,
+            details: error.details,
+            exitCode: error.exitCode,
+            stderr: error.stderr
+        });
+    }
+    
+    /**
+     * Claude CLIにクエリを送信（リトライ付き）
      * @param {string} prompt - プロンプト
      * @param {Object} options - リクエストオプション
      * @returns {Promise<string>} Claude CLIレスポンス
      */
     async makeRequest(prompt, options = {}) {
         if (!this.isAvailable) {
-            throw new Error('Claude CLI is not available. Please install Claude CLI first.');
+            throw new ClaudeCLINotFoundError({ prompt: prompt.slice(0, 100) });
         }
         
+        // リトライメカニズムで実行
+        return await this.executeWithRetry(async () => {
+            return await this._executeClaudeCommand(prompt, options);
+        });
+    }
+    
+    /**
+     * リトライメカニズム付きで関数を実行
+     * @param {Function} fn - 実行する非同期関数
+     * @returns {Promise<any>} 関数の実行結果
+     */
+    async executeWithRetry(fn) {
+        let lastError;
+        
+        for (let attempt = 1; attempt <= this.retryConfig.maxAttempts; attempt++) {
+            try {
+                return await fn();
+            } catch (error) {
+                lastError = error;
+                
+                if (!this.retryConfig.shouldRetry(error, attempt)) {
+                    this.logError(error, { attempt, maxAttempts: this.retryConfig.maxAttempts });
+                    throw error;
+                }
+                
+                const delay = this.retryConfig.getDelay(attempt);
+                console.log(`ClaudeCLI: Retry attempt ${attempt}/${this.retryConfig.maxAttempts} after ${delay}ms`, {
+                    error: error.message,
+                    errorType: error.name
+                });
+                
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+        
+        this.logError(lastError, { 
+            attempt: this.retryConfig.maxAttempts, 
+            maxAttempts: this.retryConfig.maxAttempts,
+            retriesExhausted: true
+        });
+        throw lastError;
+    }
+    
+    /**
+     * Claude CLI コマンドを実行（内部メソッド）
+     * @param {string} prompt - プロンプト
+     * @param {Object} options - リクエストオプション
+     * @returns {Promise<string>} Claude CLIレスポンス
+     */
+    async _executeClaudeCommand(prompt, options = {}) {
+        const releaseLock = await this.acquireLock();
+        
         try {
+            // レート制限チェック
+            await this.throttleIfNeeded();
+            
+            // プロンプト制限適用
+            const { prompt: limitedPrompt } = this.enforcePromptLimit(prompt, options.systemInstruction);
+            
             const { spawn } = require('child_process');
             
             // Claude CLIコマンドの構築
@@ -60,22 +280,32 @@ class ClaudeCLI {
                 '--output-format', 'text'  // テキスト形式で出力
             ];
             
+            // パフォーマンス最適化：権限チェックスキップ
+            if (this.skipPermissions) {
+                args.push('--dangerously-skip-permissions');
+            }
+            
             // プロンプトを引数として追加
-            args.push(prompt);
+            args.push(limitedPrompt);
             
             console.log('ClaudeCLI: Executing command', { 
                 model: options.model || this.model,
-                promptLength: prompt.length 
+                promptLength: limitedPrompt.length,
+                originalLength: prompt.length,
+                truncated: prompt.length !== limitedPrompt.length,
+                timeout: this.timeout,
+                skipPermissions: this.skipPermissions
             });
             
-            return new Promise((resolve, reject) => {
+            const response = await new Promise((resolve, reject) => {
                 const claudeProcess = spawn('claude', args, {
                     stdio: ['ignore', 'pipe', 'pipe'],
-                    shell: true
+                    shell: false  // セキュリティのため false に変更
                 });
                 
                 let stdout = '';
                 let stderr = '';
+                let timedOut = false;
                 
                 claudeProcess.stdout.on('data', (data) => {
                     stdout += data.toString();
@@ -86,26 +316,58 @@ class ClaudeCLI {
                 });
                 
                 claudeProcess.on('close', (code) => {
+                    if (timedOut) return; // タイムアウト済みの場合は無視
+                    
                     if (code === 0) {
                         const response = stdout.trim();
                         if (response) {
                             resolve(response);
                         } else {
-                            reject(new Error('Empty response from Claude CLI'));
+                            reject(new ClaudeCLIProcessError(
+                                'Empty response from Claude CLI',
+                                code,
+                                stderr,
+                                { stdout, stderr }
+                            ));
                         }
                     } else {
-                        reject(new Error(`Claude CLI failed with code ${code}: ${stderr || 'Unknown error'}`));
+                        reject(new ClaudeCLIProcessError(
+                            `Claude CLI failed with code ${code}`,
+                            code,
+                            stderr,
+                            { stdout, stderr }
+                        ));
                     }
                 });
                 
                 claudeProcess.on('error', (error) => {
-                    reject(new Error(`Claude CLI execution error: ${error.message}`));
+                    if (timedOut) return;
+                    
+                    if (error.code === 'ENOENT') {
+                        reject(new ClaudeCLINotFoundError({ originalError: error.message }));
+                    } else {
+                        reject(new ClaudeCLIProcessError(
+                            `Claude CLI execution error: ${error.message}`,
+                            error.code,
+                            '',
+                            { originalError: error }
+                        ));
+                    }
                 });
                 
                 // タイムアウト処理
                 const timeoutId = setTimeout(() => {
-                    claudeProcess.kill('SIGTERM');
-                    reject(new Error(`Claude CLI request timed out after ${this.timeout}ms`));
+                    timedOut = true;
+                    try {
+                        claudeProcess.kill('SIGTERM');
+                        // SIGTERM で終了しない場合は強制終了
+                        setTimeout(() => {
+                            try {
+                                claudeProcess.kill('SIGKILL');
+                            } catch (e) {}
+                        }, 5000);
+                    } catch (e) {}
+                    reject(new ClaudeCLITimeoutError(this.timeout, { promptLength: limitedPrompt.length }));
                 }, this.timeout);
                 
                 claudeProcess.on('close', () => {
@@ -113,9 +375,14 @@ class ClaudeCLI {
                 });
             });
             
-        } catch (error) {
-            console.error('ClaudeCLI: Request failed:', error);
-            throw new Error(`Claude CLI request failed: ${error.message}`);
+            // セッション履歴に追加
+            this.addToHistory('user', prompt);
+            this.addToHistory('assistant', response);
+            
+            return response;
+            
+        } finally {
+            releaseLock();
         }
     }
     
@@ -143,6 +410,60 @@ class ClaudeCLI {
      */
     async sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    
+    /**
+     * セッション履歴に追加
+     * @param {string} role - ロール（user/assistant）
+     * @param {string} content - メッセージ内容
+     * @param {Object} metadata - 追加のメタデータ
+     */
+    addToHistory(role, content, metadata = {}) {
+        this.sessionHistory.push({
+            role,
+            content,
+            timestamp: new Date().toISOString(),
+            ...metadata
+        });
+        
+        // 履歴が長すぎる場合は古いものを削除
+        if (this.sessionHistory.length > this.maxHistoryMessages) {
+            this.sessionHistory = this.sessionHistory.slice(-this.maxHistoryMessages);
+        }
+    }
+    
+    /**
+     * 直近のセッション履歴を取得
+     * @returns {Array} セッション履歴
+     */
+    getRecentHistory() {
+        return this.sessionHistory.slice(-this.maxHistoryMessages);
+    }
+    
+    /**
+     * コンテキスト付きプロンプトを構築
+     * @param {string} message - 新しいメッセージ
+     * @returns {string} コンテキスト付きプロンプト
+     */
+    buildContextPrompt(message) {
+        const history = this.getRecentHistory();
+        
+        if (history.length === 0) {
+            return message;
+        }
+        
+        const context = history
+            .map(entry => `${entry.role.charAt(0).toUpperCase() + entry.role.slice(1)}: ${entry.content}`)
+            .join('\n');
+        
+        return `${context}\nUser: ${message}`;
+    }
+    
+    /**
+     * セッション履歴をクリア
+     */
+    clearHistory() {
+        this.sessionHistory = [];
     }
 }
 
@@ -546,10 +867,26 @@ ${text}`;
 
 // モジュールのエクスポート
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { ClaudeCLI, LanguageDetector, TranslationService, SummaryService };
+    module.exports = { 
+        ClaudeCLI, 
+        LanguageDetector, 
+        TranslationService, 
+        SummaryService,
+        // カスタム例外クラスもエクスポート
+        ClaudeCLIError,
+        ClaudeCLITimeoutError,
+        ClaudeCLIProcessError,
+        ClaudeCLINotFoundError,
+        RetryConfig
+    };
 } else {
     window.ClaudeCLI = ClaudeCLI;
     window.LanguageDetector = LanguageDetector;
     window.TranslationService = TranslationService;
     window.SummaryService = SummaryService;
+    window.ClaudeCLIError = ClaudeCLIError;
+    window.ClaudeCLITimeoutError = ClaudeCLITimeoutError;
+    window.ClaudeCLIProcessError = ClaudeCLIProcessError;
+    window.ClaudeCLINotFoundError = ClaudeCLINotFoundError;
+    window.RetryConfig = RetryConfig;
 }
