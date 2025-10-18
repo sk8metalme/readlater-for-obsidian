@@ -179,10 +179,12 @@ class AggregatedFileManager {
                 // ファイルの書き込み
                 await this.writeFile(filePath, newContent);
 
+                // 書き込み後の実際の記事数を取得
+                const parsed = await this.parseExistingFile(newContent);
                 return {
                     success: true,
                     filePath,
-                    articlesCount: 1 // 簡易実装
+                    articlesCount: parsed.articles.length
                 };
 
             } catch (error) {

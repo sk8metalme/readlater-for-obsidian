@@ -135,7 +135,15 @@ async function handleMessage(msg) {
         const safeText = text.length > MAX_TEXT_LEN ? text.slice(0, MAX_TEXT_LEN) : text;
         const prompt = buildKeywordsPrompt(safeText, options);
         const out = await runClaude(prompt, options.timeoutMs || 60000);
-        const keywords = out.split(',').map(s => s.trim()).filter(Boolean).slice(0, options.maxKeywords || 8);
+        
+        // カンマ、改行、日本語区切り文字（、・）、箇条書き記号で分割
+        const parts = out
+          .split(/[\n,、・]|(?:^|\s)[\-\*•]\s+/g)
+          .map(s => s.trim())
+          .filter(Boolean);
+        
+        // 重複を除去して最大数まで取得
+        const keywords = Array.from(new Set(parts)).slice(0, options.maxKeywords || 8);
         return ok({ keywords });
       }
       case 'writeFile': {

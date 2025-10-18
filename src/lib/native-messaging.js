@@ -37,7 +37,7 @@
 
     async summarize(text, options = {}) {
       console.log('[NativeClaudeBridge] Summarize request', {
-        textLength: text.length,
+        textLength: typeof text === 'string' ? text.length : 0,
         style: options.style || 'structured',
         maxLength: options.maxLength || 500,
         timeoutMs: options.timeoutMs || this.timeoutMs
@@ -70,7 +70,9 @@
         console.log('[NativeClaudeBridge] Sending message', {
           type: message.type,
           timeout: useTimeout,
-          messageSize: JSON.stringify(message).length
+          approxPayloadSize: 
+            typeof message.text === 'string' ? message.text.length :
+            (message.summary || message.translatedText ? 1 : 0)
         });
         
         const timer = setTimeout(() => {

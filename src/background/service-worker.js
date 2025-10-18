@@ -4,6 +4,8 @@
 // ESMとして静的インポート（副作用でself.*にエクスポートされる）
 import '../lib/native-messaging.js';
 import '../lib/markdown-generator.js';
+import '../lib/article-table-manager.js';
+import '../lib/aggregated-markdown-generator.js';
 import '../lib/aggregated-file-manager.js';
 import '../utils/error-handler.js';
 console.log('ReadLater for Obsidian: Libraries imported as modules');
@@ -460,47 +462,20 @@ function validateSettings(settings) {
 }
 
 /**
- * 集約保存用のクラスを動的に読み込む
+ * 集約保存用のクラスを確認
  */
 async function loadAggregatedSavingClasses() {
     try {
         console.log('ReadLater for Obsidian: Loading aggregated saving classes');
         
-        // importMaps APIまたはfetchを使用してクラスを読み込み
+        // 静的インポート済みのクラスが存在することを確認
         if (!globalThis.AggregatedFileManager) {
-            await importAggregatedSavingModules();
+            throw new Error('AggregatedFileManager is not available. Check module imports.');
         }
         
         console.log('ReadLater for Obsidian: Aggregated saving classes loaded successfully');
     } catch (error) {
         console.error('ReadLater for Obsidian: Failed to load aggregated saving classes', error);
-        throw error;
-    }
-}
-
-/**
- * 集約保存モジュールをインポート
- */
-async function importAggregatedSavingModules() {
-    try {
-        // Service Worker環境で動作するスクリプト実行
-        const modules = [
-            'src/utils/error-handler.js',
-            'src/lib/article-table-manager.js', 
-            'src/lib/aggregated-markdown-generator.js',
-            'src/lib/aggregated-file-manager.js'
-        ];
-        
-        for (const modulePath of modules) {
-            const url = chrome.runtime.getURL(modulePath);
-            const response = await fetch(url);
-            const moduleCode = await response.text();
-            
-            // Global スコープでコードを実行
-            eval(moduleCode);
-        }
-    } catch (error) {
-        console.error('ReadLater for Obsidian: Error importing aggregated saving modules:', error);
         throw error;
     }
 }

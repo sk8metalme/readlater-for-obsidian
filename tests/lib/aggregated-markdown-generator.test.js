@@ -6,6 +6,16 @@ describe('AggregatedMarkdownGenerator', () => {
   let mockArticles;
   let mockSettings;
 
+  // テスト全体でシステム時刻を固定
+  beforeAll(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2025-01-16T00:00:00Z'));
+  });
+
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     

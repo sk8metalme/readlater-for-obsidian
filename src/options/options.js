@@ -3,6 +3,18 @@
 
 console.log('ReadLater for Obsidian: Options page loaded');
 
+/**
+ * クロスプラットフォーム対応の絶対パス判定
+ * @param {string} p - 判定するパス
+ * @returns {boolean} 絶対パスの場合true
+ */
+function isAbsolutePath(p) {
+    if (!p) return false;
+    // Windows: C:\... または \\server\share (UNC)
+    // Unix/Mac: /...
+    return /^([a-zA-Z]:\\|\\\\|\/)/.test(p);
+}
+
 // DOM要素の取得
 const elements = {
     // 入力フィールド
@@ -236,7 +248,7 @@ ${new Date().toLocaleString('ja-JP')}
 `;
         
         // 保存方式を切り替え
-        const isAbsolute = /^\//.test(path);
+        const isAbsolute = isAbsolutePath(path);
         const fnameOnly = `readlater-test-${Date.now()}.md`;
 
         if (isAbsolute) {
@@ -316,8 +328,21 @@ async function saveSettings() {
             throw new Error('集約ファイル名が入力されていません');
         }
         
-        if (settings.aggregatedFileName && !settings.aggregatedFileName.endsWith('.md')) {
-            settings.aggregatedFileName += '.md';
+        if (settings.aggregatedFileName) {
+            // パス区切り文字のチェック
+            if (/[\\/]/.test(settings.aggregatedFileName)) {
+                throw new Error('集約ファイル名に/や\\は使用できません');
+            }
+            
+            // 危険文字の除去
+            settings.aggregatedFileName = settings.aggregatedFileName
+                .replace(/[<>:"/\\|?*]/g, '')   // 危険文字除去
+                .replace(/^\.+/, '');           // 先頭ドット除去
+            
+            // 拡張子の追加
+            if (!settings.aggregatedFileName.endsWith('.md')) {
+                settings.aggregatedFileName += '.md';
+            }
         }
         
         // Slack通知設定の検証

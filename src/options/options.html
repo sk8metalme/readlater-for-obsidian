@@ -15,7 +15,7 @@
 
         <main class="main-content">
             <!-- 設定保存状況の表示 -->
-            <div id="status-message" class="status-message" style="display: none;"></div>
+            <div id="status-message" class="status-message" style="display: none;" role="status" aria-live="polite"></div>
 
             <!-- 基本設定セクション -->
             <section class="settings-section">
@@ -164,10 +164,13 @@
                         <span class="conditional-required">*</span>
                     </label>
                     <input 
-                        type="text" 
+                        type="password" 
                         id="slack-webhook-url" 
                         class="setting-input" 
                         placeholder="例: https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+                        autocomplete="off"
+                        spellcheck="false"
+                        inputmode="url"
                         disabled
                     >
                     <div class="setting-help">
@@ -240,7 +243,7 @@
             
             <div class="footer-info">
                 <p>ReadLater for Obsidian v1.0.0</p>
-                <p>問題の報告: <a href="https://github.com/yourusername/readlater-for-obsidian/issues" target="_blank">GitHub Issues</a></p>
+                <p>問題の報告: <a href="https://github.com/sk8metalme/readlater-for-obsidian/issues" target="_blank" rel="noopener">GitHub Issues</a></p>
             </div>
         </footer>
     </div>
