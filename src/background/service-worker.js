@@ -112,7 +112,7 @@ async function handleSaveArticle(info, tab) {
                 title: tab.title,
                 selection: info.selectionText || null
             }
-        }, (response) => {
+        }, async (response) => {
             if (chrome.runtime.lastError) {
                 console.error('ReadLater for Obsidian: Failed to communicate with content script', chrome.runtime.lastError);
                 showNotification('エラー', 'ページの解析に失敗しました', 'error');
@@ -122,7 +122,13 @@ async function handleSaveArticle(info, tab) {
             if (response && response.success) {
                 console.log('ReadLater for Obsidian: Article extraction successful');
                 showProgressNotification('記事抽出完了', 30, '記事データを処理しています...');
-                processExtractedArticle(response.data, settings);
+                
+                try {
+                    await processExtractedArticle(response.data, settings);
+                } catch (error) {
+                    console.error('ReadLater for Obsidian: Error in processExtractedArticle', error);
+                    showErrorNotification('記事処理エラー', error, { url: tab.url });
+                }
             } else {
                 console.error('ReadLater for Obsidian: Article extraction failed', response);
                 showErrorNotification('記事抽出エラー', new Error('記事の抽出に失敗しました'), { url: tab.url });
@@ -358,8 +364,8 @@ async function saveMarkdownFile(markdown, title, settings) {
                 
                 console.log('ReadLater for Obsidian: File saved with ID', downloadId);
                 
-                // ダウンロード完了を監視
-                const checkDownloadStatus = () => {
+                // ダウンロード完了を監視（指数バックオフ付き）
+                const checkDownloadStatus = (attempt = 0) => {
                     chrome.downloads.search({ id: downloadId }, (downloads) => {
                         if (chrome.runtime.lastError) {
                             console.error('ReadLater for Obsidian: Error checking download status', chrome.runtime.lastError);
@@ -368,8 +374,13 @@ async function saveMarkdownFile(markdown, title, settings) {
                         }
                         
                         if (downloads.length === 0) {
-                            // ダウンロードが見つからない場合、少し待って再試行
-                            setTimeout(checkDownloadStatus, 1000);
+                            // ダウンロードが見つからない場合、指数バックオフで再試行（最大10回）
+                            if (attempt < 10) {
+                                const delay = Math.min(100 * Math.pow(2, attempt), 3000); // 100ms, 200ms, 400ms, ..., max 3s
+                                setTimeout(() => checkDownloadStatus(attempt + 1), delay);
+                            } else {
+                                reject(new Error('ダウンロードが見つかりませんでした'));
+                            }
                             return;
                         }
                         
@@ -377,7 +388,8 @@ async function saveMarkdownFile(markdown, title, settings) {
                         console.log('ReadLater for Obsidian: Download status', {
                             id: download.id,
                             state: download.state,
-                            filename: download.filename
+                            filename: download.filename,
+                            attempt
                         });
                         
                         if (download.state === 'complete') {
@@ -391,14 +403,14 @@ async function saveMarkdownFile(markdown, title, settings) {
                         } else if (download.state === 'interrupted') {
                             reject(new Error(`ダウンロードが中断されました: ${download.error || '不明なエラー'}`));
                         } else {
-                            // 進行中の場合は少し待って再確認
-                            setTimeout(checkDownloadStatus, 1000);
+                            // 進行中の場合は1秒後に再確認
+                            setTimeout(() => checkDownloadStatus(attempt), 1000);
                         }
                     });
                 };
                 
                 // ダウンロード状況の確認を開始
-                setTimeout(checkDownloadStatus, 500);
+                checkDownloadStatus(0);
             });
             
         } catch (error) {
@@ -1081,14 +1093,28 @@ async function processWithNativeClaude(articleData, settings) {
     return result;
 }
 
-function chunkText(text, chunkSize) {
-    const chunks = [];
+/**
+ * テキストをチャンク化（Generator使用でメモリ効率化）
+ * @param {string} text - チャンク化するテキスト
+ * @param {number} chunkSize - チャンクサイズ
+ * @yields {string} テキストチャンク
+ */
+function* chunkTextGenerator(text, chunkSize) {
     let i = 0;
     while (i < text.length) {
-        chunks.push(text.slice(i, i + chunkSize));
+        yield text.slice(i, i + chunkSize);
         i += chunkSize;
     }
-    return chunks;
+}
+
+/**
+ * 後方互換性のためのchunkText関数（内部でgeneratorを使用）
+ * @param {string} text - チャンク化するテキスト
+ * @param {number} chunkSize - チャンクサイズ
+ * @returns {Array<string>} チャンク配列
+ */
+function chunkText(text, chunkSize) {
+    return Array.from(chunkTextGenerator(text, chunkSize));
 }
 
 /**

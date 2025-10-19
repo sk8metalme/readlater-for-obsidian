@@ -2,6 +2,23 @@
 // 集約Markdownファイルの管理を担当するクラス
 
 /**
+ * Escape text for Markdown table cell (prevents XSS)
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text
+ */
+function escapeMarkdownTableCell(text) {
+    return (text || '')
+        .replace(/&/g, '&amp;')      // Must be first
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/\|/g, '&#124;')
+        .replace(/\n/g, ' ')
+        .replace(/\r/g, '');
+}
+
+/**
  * 集約Markdownファイルの管理クラス
  */
 class AggregatedFileManager {
@@ -233,9 +250,9 @@ class AggregatedFileManager {
             const shortSummary = articleData.shortSummary || 
                                 articleData.summary?.substring(0, settings.maxTableSummaryLength || 100) || '';
 
-            // テーブル内容のエスケープ
-            const escapedTitle = (articleData.title || '').replace(/\|/g, '&#124;').replace(/\n/g, ' ');
-            const escapedSummary = shortSummary.replace(/\|/g, '&#124;').replace(/\n/g, ' ');
+            // テーブル内容のエスケープ (XSS防止)
+            const escapedTitle = escapeMarkdownTableCell(articleData.title);
+            const escapedSummary = escapeMarkdownTableCell(shortSummary);
 
             const content = `# ReadLater Articles
 
@@ -277,9 +294,9 @@ class AggregatedFileManager {
             const shortSummary = articleData.shortSummary || 
                                 articleData.summary?.substring(0, settings.maxTableSummaryLength || 100) || '';
 
-            // テーブル内容のエスケープ
-            const escapedTitle = (articleData.title || '').replace(/\|/g, '&#124;').replace(/\n/g, ' ');
-            const escapedSummary = shortSummary.replace(/\|/g, '&#124;').replace(/\n/g, ' ');
+            // テーブル内容のエスケープ (XSS防止)
+            const escapedTitle = escapeMarkdownTableCell(articleData.title);
+            const escapedSummary = escapeMarkdownTableCell(shortSummary);
 
             // テーブルに新しい行を追加
             const newTableRow = `| ${escapedTitle} | ${articleData.url} | ${escapedSummary} | ${date} |`;

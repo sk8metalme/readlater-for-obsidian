@@ -24,6 +24,22 @@ console.error = function(...args) {
   originalConsoleError.apply(console, args);
 };
 
+// Cleanup handlers for graceful shutdown
+process.on('beforeExit', () => {
+  console.error('[claude_host] Process beforeExit, closing log stream');
+  logStream.end();
+});
+
+process.on('SIGINT', () => {
+  console.error('[claude_host] Received SIGINT, shutting down');
+  logStream.end(() => process.exit(0));
+});
+
+process.on('SIGTERM', () => {
+  console.error('[claude_host] Received SIGTERM, shutting down');
+  logStream.end(() => process.exit(0));
+});
+
 // Ensure PATH includes common CLI locations (macOS/Linux GUI launches have limited PATH)
 (() => {
   const sep = process.platform === 'win32' ? ';' : ':';
@@ -38,7 +54,16 @@ console.error = function(...args) {
 })();
 
 function getClaudeCmd() {
-  if (process.env.CLAUDE_BIN && process.env.CLAUDE_BIN.trim()) return process.env.CLAUDE_BIN.trim();
+  if (process.env.CLAUDE_BIN && process.env.CLAUDE_BIN.trim()) {
+    const bin = process.env.CLAUDE_BIN.trim();
+    // Validate: no shell metacharacters, no path traversal
+    // Allow alphanumeric, underscore, hyphen, dot, forward slash only
+    if (!/^[a-zA-Z0-9_\-\.\/]+$/.test(bin)) {
+      console.error('[claude_host] Invalid CLAUDE_BIN: contains unsafe characters');
+      return 'claude';
+    }
+    return bin;
+  }
   return 'claude';
 }
 
@@ -108,8 +133,18 @@ async function handleMessage(msg) {
       case 'check': {
         try {
           const cmd = getClaudeCmd();
-          const version = execSync(`${cmd} --version`, { timeout: 5000, stdio: ['ignore','pipe','pipe'] }).toString().trim();
-          return ok({ available: true, version, message: 'Claude CLI available' });
+          // Use spawnSync with args array to prevent shell injection
+          const result = require('child_process').spawnSync(cmd, ['--version'], { 
+            timeout: 5000, 
+            stdio: ['ignore','pipe','pipe'],
+            shell: false  // Disable shell to prevent command injection
+          });
+          if (result.status === 0 && result.stdout) {
+            const version = result.stdout.toString().trim();
+            return ok({ available: true, version, message: 'Claude CLI available' });
+          } else {
+            return ok({ available: false, message: 'Claude CLI not found' });
+          }
         } catch (e) {
           return ok({ available: false, message: 'Claude CLI not found' });
         }
@@ -152,10 +187,32 @@ async function handleMessage(msg) {
         if (!filePath) return err('Missing filePath');
         if (typeof content !== 'string') return err('Invalid content');
         if (content.length > 10 * 1024 * 1024) return err('Content too large');
+        
         const home = os.homedir();
         const resolvedPath = path.resolve(filePath);
-        const rel = path.relative(home, resolvedPath);
-        if (rel.startsWith('..') || path.isAbsolute(rel)) return err('File path outside home is not allowed');
+        const normalizedPath = path.normalize(resolvedPath);
+        
+        // Check real path (follows symlinks) to prevent symlink attacks
+        let realPath;
+        try {
+          realPath = await fsp.realpath(path.dirname(resolvedPath)).catch(() => path.dirname(resolvedPath));
+          realPath = path.join(realPath, path.basename(resolvedPath));
+        } catch (e) {
+          // Directory doesn't exist yet, use normalized path
+          realPath = normalizedPath;
+        }
+        
+        // Validate path is within home directory
+        const rel = path.relative(home, realPath);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+          return err('File path outside home is not allowed');
+        }
+        
+        // Additional security check: ensure resolved path starts with home
+        if (!realPath.startsWith(home + path.sep) && realPath !== home) {
+          return err('File path outside home is not allowed');
+        }
+        
         await fsp.mkdir(path.dirname(resolvedPath), { recursive: true });
         await fsp.writeFile(resolvedPath, content, { encoding });
         const stats = await fsp.stat(resolvedPath);
@@ -164,10 +221,34 @@ async function handleMessage(msg) {
       case 'readFile': {
         const { filePath, encoding = 'utf8' } = msg;
         if (!filePath) return err('Missing filePath');
+        
         const home = os.homedir();
         const resolvedPath = path.resolve(filePath);
-        const rel = path.relative(home, resolvedPath);
-        if (rel.startsWith('..') || path.isAbsolute(rel)) return err('File path outside home is not allowed');
+        const normalizedPath = path.normalize(resolvedPath);
+        
+        // Check real path (follows symlinks) to prevent symlink attacks
+        let realPath;
+        try {
+          realPath = await fsp.realpath(resolvedPath);
+        } catch (e) {
+          if (e.code === 'ENOENT') {
+            return err('File not found');
+          }
+          // For other errors, use normalized path
+          realPath = normalizedPath;
+        }
+        
+        // Validate path is within home directory
+        const rel = path.relative(home, realPath);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+          return err('File path outside home is not allowed');
+        }
+        
+        // Additional security check: ensure resolved path starts with home
+        if (!realPath.startsWith(home + path.sep) && realPath !== home) {
+          return err('File path outside home is not allowed');
+        }
+        
         try {
           const content = await fsp.readFile(resolvedPath, { encoding });
           const stats = await fsp.stat(resolvedPath);
@@ -254,8 +335,18 @@ function runClaude(prompt, timeoutMs = 60000) {
         errorLength: err.length
       });
       timedOut = true;
-      try { p.kill('SIGTERM'); } catch (_) {}
-      setTimeout(() => { try { p.kill('SIGKILL'); } catch (_) {} }, 3000);
+      try { 
+        p.kill('SIGTERM'); 
+      } catch (e) {
+        console.error('[claude_host] Failed to kill process with SIGTERM:', e.message);
+      }
+      setTimeout(() => { 
+        try { 
+          p.kill('SIGKILL'); 
+        } catch (e) {
+          console.error('[claude_host] Failed to kill process with SIGKILL:', e.message);
+        }
+      }, 3000);
     }, timeoutMs);
     
     p.on('close', (code) => {
@@ -340,6 +431,10 @@ async function main() {
 }
 
 main().catch((e) => {
-  try { writeMessage(err(e.message)); } catch (_) {}
+  try { 
+    writeMessage(err(e.message)); 
+  } catch (writeError) {
+    console.error('[claude_host] Failed to write error message:', writeError.message);
+  }
   process.exit(1);
 });
