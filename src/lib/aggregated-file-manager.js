@@ -369,13 +369,11 @@ class AggregatedFileManager {
      * @returns {Promise<Object>} レスポンス
      */
     async _sendNativeMessage(payload) {
-        try {
-            const maybe = chrome.runtime.sendNativeMessage('com.readlater.claude_host', payload);
-            if (maybe && typeof maybe.then === 'function') return await maybe;
-        } catch (_) { /* fallback */ }
         return await new Promise((resolve, reject) => {
             chrome.runtime.sendNativeMessage('com.readlater.claude_host', payload, (response) => {
-                if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+                if (chrome.runtime.lastError) {
+                    return reject(new Error(chrome.runtime.lastError.message));
+                }
                 resolve(response);
             });
         });
