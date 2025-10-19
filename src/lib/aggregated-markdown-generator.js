@@ -1,9 +1,8 @@
 // ReadLater for Obsidian - Aggregated Markdown Generator
 // 集約Markdownファイル全体の生成を担当するクラス
 
-// 既存モジュールのインポート（実際のブラウザ環境ではself.*から利用）
-const { MarkdownGenerator } = require('./markdown-generator.js');
-const { ArticleTableManager } = require('./article-table-manager.js');
+// Note: MarkdownGeneratorとArticleTableManagerはグローバルスコープから取得
+// require()を使用するとimportScripts()との競合が発生するため削除
 
 /**
  * 集約Markdownファイル生成クラス
@@ -11,8 +10,16 @@ const { ArticleTableManager } = require('./article-table-manager.js');
 class AggregatedMarkdownGenerator {
     constructor(dependencies = {}) {
         // 依存関係の注入（テスト用）
-        this.markdownGenerator = dependencies.markdownGenerator || new MarkdownGenerator();
-        this.tableManager = dependencies.tableManager || new ArticleTableManager();
+        // グローバルスコープからクラスを取得（importScriptsまたはブラウザ環境で読み込まれている）
+        const MarkdownGeneratorClass = dependencies.markdownGenerator ? dependencies.markdownGenerator.constructor : 
+            (typeof MarkdownGenerator !== 'undefined' ? MarkdownGenerator : null);
+        const ArticleTableManagerClass = dependencies.tableManager ? dependencies.tableManager.constructor :
+            (typeof ArticleTableManager !== 'undefined' ? ArticleTableManager : null);
+        
+        this.markdownGenerator = dependencies.markdownGenerator || 
+            (MarkdownGeneratorClass ? new MarkdownGeneratorClass() : null);
+        this.tableManager = dependencies.tableManager || 
+            (ArticleTableManagerClass ? new ArticleTableManagerClass() : null);
         
         this.options = {
             includeTableOfContents: true,
@@ -22,9 +29,12 @@ class AggregatedMarkdownGenerator {
         };
         
         // エラーハンドラーの初期化
+        const ErrorHandlerClass = typeof ErrorHandler !== 'undefined' ? ErrorHandler : null;
         this.errorHandler = dependencies.errorHandler || 
-            new (typeof ErrorHandler !== 'undefined' ? ErrorHandler : 
-                require('../utils/error-handler.js').ErrorHandler)();
+            (ErrorHandlerClass ? new ErrorHandlerClass() : {
+                handleError: (e) => ({ error: e?.message }),
+                retry: async (fn) => fn()
+            });
     }
 
     /**

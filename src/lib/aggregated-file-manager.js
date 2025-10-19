@@ -31,13 +31,8 @@ class AggregatedFileManager {
         };
         
         // エラーハンドラーの初期化
-        const EH =
-          (typeof ErrorHandler !== 'undefined')
-            ? ErrorHandler
-            : (typeof require === 'function'
-                ? require('../utils/error-handler.js').ErrorHandler
-                : null);
-        this.errorHandler = this.options.errorHandler || (EH ? new EH() : {
+        const ErrorHandlerClass = (typeof ErrorHandler !== 'undefined') ? ErrorHandler : null;
+        this.errorHandler = this.options.errorHandler || (ErrorHandlerClass ? new ErrorHandlerClass() : {
           handleError: (e) => ({ error: e?.message }),
           retry: async (fn) => fn()
         });
