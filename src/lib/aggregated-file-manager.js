@@ -2,6 +2,23 @@
 // 集約Markdownファイルの管理を担当するクラス
 
 /**
+ * Escape text for Markdown table cell (prevents XSS)
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text
+ */
+function escapeMarkdownTableCell(text) {
+    return (text || '')
+        .replace(/&/g, '&amp;')      // Must be first
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/\|/g, '&#124;')
+        .replace(/\n/g, ' ')
+        .replace(/\r/g, '');
+}
+
+/**
  * 集約Markdownファイルの管理クラス
  */
 class AggregatedFileManager {
@@ -12,6 +29,18 @@ class AggregatedFileManager {
             maxFileSize: 10 * 1024 * 1024, // 10MB
             ...options
         };
+        
+        // エラーハンドラーの初期化
+        const EH =
+          (typeof ErrorHandler !== 'undefined')
+            ? ErrorHandler
+            : (typeof require === 'function'
+                ? require('../utils/error-handler.js').ErrorHandler
+                : null);
+        this.errorHandler = this.options.errorHandler || (EH ? new EH() : {
+          handleError: (e) => ({ error: e?.message }),
+          retry: async (fn) => fn()
+        });
     }
 
     /**
@@ -23,8 +52,13 @@ class AggregatedFileManager {
         // デフォルトファイル名
         const defaultFileName = 'ReadLater_Articles.md';
         
-        // 設定からファイル名を取得
-        let fileName = settings.fileName || defaultFileName;
+        // 設定が無効な場合はデフォルトを使用
+        if (!settings || typeof settings !== 'object') {
+            return defaultFileName;
+        }
+        
+        // 設定からファイル名を取得（aggregatedFileNameを使用）
+        let fileName = settings.aggregatedFileName || defaultFileName;
         
         // 元のファイル名をチェックして、不正なパスが含まれている場合はデフォルトを使用
         if (fileName.includes('../') || fileName.includes('./') || fileName.includes('/') || fileName.includes('\\')) {
@@ -39,7 +73,15 @@ class AggregatedFileManager {
             fileName = defaultFileName;
         }
 
-        return fileName;
+        // 保存先フォルダと組み合わせてフルパスを生成
+        const obsidianPath = settings.obsidianPath || 'ReadLater';
+        if (obsidianPath.startsWith('/') || obsidianPath.match(/^[A-Za-z]:/)) {
+            // 絶対パスの場合
+            return `${obsidianPath}/${fileName}`;
+        } else {
+            // 相対パスの場合（Downloadsフォルダに保存）
+            return fileName;
+        }
     }
 
     /**
@@ -48,44 +90,64 @@ class AggregatedFileManager {
      * @returns {Promise<Object>} 解析結果
      */
     async parseExistingFile(content) {
-        if (!content || typeof content !== 'string') {
+        try {
+            if (!content || typeof content !== 'string') {
+                return {
+                    tableContent: '',
+                    articles: []
+                };
+            }
+
+            const result = {
+                tableContent: '',
+                articles: []
+            };
+
+            // テーブルセクションの抽出（テーブル終了まで）
+            const tableRegex = /\|\s*タイトル\s*\|[\s\S]*?(?=\n---\n|$)/;
+            const tableMatch = content.match(tableRegex);
+            
+            if (tableMatch) {
+                result.tableContent = tableMatch[0];
+                
+                // テーブル行の解析
+                const lines = result.tableContent.split('\n');
+                for (let i = 2; i < lines.length; i++) { // Skip header and separator
+                    const line = lines[i].trim();
+                    if (line.startsWith('|') && line.endsWith('|')) {
+                        const columns = line.split('|').map(col => col.trim()).slice(1, -1);
+                        if (columns.length >= 4) {
+                            // 空の行や無効な行を除外
+                            const title = columns[0];
+                            const url = columns[1];
+                            if (title && url) {
+                                result.articles.push({
+                                    title: title,
+                                    url: url,
+                                    summary: columns[2],
+                                    date: columns[3]
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            return result;
+            
+        } catch (error) {
+            const errorResult = this.errorHandler.handleError(
+                new Error(`集約ファイルの解析に失敗: ${error.message}`),
+                { operation: 'parseExistingFile', contentLength: content?.length || 0 }
+            );
+            
+            // パースエラーの場合でも空の結果を返してフォールバック
+            console.warn('AggregatedFileManager: Parse error, returning empty result', errorResult);
             return {
                 tableContent: '',
                 articles: []
             };
         }
-
-        const result = {
-            tableContent: '',
-            articles: []
-        };
-
-        // テーブルセクションの抽出
-        const tableRegex = /\|\s*タイトル\s*\|[\s\S]*?(?=\n##|\n$|$)/;
-        const tableMatch = content.match(tableRegex);
-        
-        if (tableMatch) {
-            result.tableContent = tableMatch[0];
-            
-            // テーブル行の解析
-            const lines = result.tableContent.split('\n');
-            for (let i = 2; i < lines.length; i++) { // Skip header and separator
-                const line = lines[i].trim();
-                if (line.startsWith('|') && line.endsWith('|')) {
-                    const columns = line.split('|').map(col => col.trim()).slice(1, -1);
-                    if (columns.length >= 4) {
-                        result.articles.push({
-                            title: columns[0],
-                            url: columns[1],
-                            summary: columns[2],
-                            date: columns[3]
-                        });
-                    }
-                }
-            }
-        }
-
-        return result;
     }
 
     /**
@@ -95,45 +157,80 @@ class AggregatedFileManager {
      * @returns {Promise<Object>} 追加結果
      */
     async addArticleToAggregatedFile(articleData, settings) {
-        const filePath = this.generateFilePath(settings);
-        
-        try {
-            // 既存ファイルの読み込み
-            let existingContent;
+        return await this.errorHandler.retry(async () => {
+            const filePath = this.generateFilePath(settings);
+            
             try {
-                existingContent = await this.readFile(filePath);
-            } catch (error) {
-                // ファイルが存在しない場合は新規作成
-                existingContent = '';
-            }
+                // バリデーション
+                if (!articleData || !articleData.title || !articleData.url) {
+                    throw new Error('記事データが不完全です: title と url は必須です');
+                }
+                
+                if (!settings) {
+                    throw new Error('設定データが不完全です');
+                }
 
-            let newContent;
-            if (existingContent) {
-                // 既存ファイルの形式チェック
-                const parsedFile = await this.parseExistingFile(existingContent);
-                if (this.isValidAggregatedContent(existingContent)) {
-                    newContent = await this.appendArticleToExisting(existingContent, articleData, settings, parsedFile);
+                // 既存ファイルの読み込み
+                let existingContent;
+                try {
+                    existingContent = await this.readFile(filePath);
+                } catch (error) {
+                    // ファイルが存在しない場合は新規作成
+                    console.log('AggregatedFileManager: File not found, creating new file:', filePath);
+                    existingContent = '';
+                }
+
+                let newContent;
+                if (existingContent) {
+                    // 既存ファイルの形式チェック
+                    const parsedFile = await this.parseExistingFile(existingContent);
+                    if (this.isValidAggregatedContent(existingContent)) {
+                        newContent = await this.appendArticleToExisting(existingContent, articleData, settings, parsedFile);
+                    } else {
+                        console.warn('AggregatedFileManager: Invalid file format, creating new file');
+                        // 無効なファイル形式の場合は新規作成
+                        newContent = await this.createNewAggregatedFile(articleData, settings);
+                    }
                 } else {
-                    // 無効なファイル形式の場合は新規作成
+                    // 新規ファイル作成
                     newContent = await this.createNewAggregatedFile(articleData, settings);
                 }
-            } else {
-                // 新規ファイル作成
-                newContent = await this.createNewAggregatedFile(articleData, settings);
+
+                // ファイルサイズチェック
+                if (newContent.length > this.options.maxFileSize) {
+                    throw new Error(`ファイルサイズが制限を超えています: ${newContent.length} bytes > ${this.options.maxFileSize} bytes`);
+                }
+
+                // ファイルの書き込み
+                await this.writeFile(filePath, newContent);
+
+                // 書き込み後の実際の記事数を取得
+                const parsed = await this.parseExistingFile(newContent);
+                return {
+                    success: true,
+                    filePath,
+                    articlesCount: parsed.articles.length
+                };
+
+            } catch (error) {
+                // エラーの詳細な分類と処理
+                let contextualError;
+                if (error.message.includes('ファイルサイズ') || error.message.includes('制限')) {
+                    contextualError = new Error(`storage error: ${error.message}`);
+                } else if (error.message.includes('解析') || error.message.includes('parsing')) {
+                    contextualError = new Error(`aggregated file conflict: ${error.message}`);
+                } else if (error.message.includes('不完全') || error.message.includes('required')) {
+                    contextualError = new Error(`validation error: ${error.message}`);
+                } else {
+                    contextualError = new Error(`aggregated file error: ${error.message}`);
+                }
+                
+                throw contextualError;
             }
-
-            // ファイルの書き込み
-            await this.writeFile(filePath, newContent);
-
-            return {
-                success: true,
-                filePath,
-                articlesCount: 1 // 簡易実装
-            };
-
-        } catch (error) {
-            throw error;
-        }
+        }, {
+            maxRetries: 2,
+            delay: 500
+        });
     }
 
     /**
@@ -143,29 +240,39 @@ class AggregatedFileManager {
      * @returns {Promise<string>} ファイル内容
      */
     async createNewAggregatedFile(articleData, settings) {
-        const date = articleData.savedDate.toISOString().split('T')[0];
-        const shortSummary = articleData.shortSummary || articleData.summary?.substring(0, settings.maxTableSummaryLength || 100) || '';
+        try {
+            // データ検証
+            if (!articleData.savedDate || !(articleData.savedDate instanceof Date)) {
+                articleData.savedDate = new Date();
+            }
+            
+            const date = articleData.savedDate.toISOString().split('T')[0];
+            const shortSummary = articleData.shortSummary || 
+                                articleData.summary?.substring(0, settings.maxTableSummaryLength || 100) || '';
 
-        const content = `# ReadLater Articles
+            // テーブル内容のエスケープ (XSS防止)
+            const escapedTitle = escapeMarkdownTableCell(articleData.title);
+            const escapedSummary = escapeMarkdownTableCell(shortSummary);
+
+            const content = `# ReadLater Articles
 
 | タイトル | URL | 要約 | 日時 |
 |---------|-----|------|------|
-| ${articleData.title} | ${articleData.url} | ${shortSummary} | ${date} |
-
-## 記事詳細
-
-### ${articleData.title}
-
-**元記事**: [${articleData.title}](${articleData.url})
-**保存日**: ${date}
-
-${articleData.content}
+| ${escapedTitle} | ${articleData.url} | ${escapedSummary} | ${date} |
 
 ---
 *Generated by ReadLater for Obsidian*
 `;
 
-        return content;
+            return content;
+            
+        } catch (error) {
+            const errorResult = this.errorHandler.handleError(
+                new Error(`新規集約ファイル作成に失敗: ${error.message}`),
+                { operation: 'createNewAggregatedFile', articleTitle: articleData?.title }
+            );
+            throw error;
+        }
     }
 
     /**
@@ -177,62 +284,66 @@ ${articleData.content}
      * @returns {Promise<string>} 更新されたファイル内容
      */
     async appendArticleToExisting(existingContent, articleData, settings, parsedFile) {
-        const date = articleData.savedDate.toISOString().split('T')[0];
-        const shortSummary = articleData.shortSummary || articleData.summary?.substring(0, settings.maxTableSummaryLength || 100) || '';
+        try {
+            // データ検証
+            if (!articleData.savedDate || !(articleData.savedDate instanceof Date)) {
+                articleData.savedDate = new Date();
+            }
+            
+            const date = articleData.savedDate.toISOString().split('T')[0];
+            const shortSummary = articleData.shortSummary || 
+                                articleData.summary?.substring(0, settings.maxTableSummaryLength || 100) || '';
 
-        // テーブルに新しい行を追加
-        const newTableRow = `| ${articleData.title} | ${articleData.url} | ${shortSummary} | ${date} |`;
-        
-        let updatedContent = existingContent;
+            // テーブル内容のエスケープ (XSS防止)
+            const escapedTitle = escapeMarkdownTableCell(articleData.title);
+            const escapedSummary = escapeMarkdownTableCell(shortSummary);
 
-        // テーブルの更新
-        if (parsedFile.tableContent) {
-            const newTableContent = parsedFile.tableContent + '\n' + newTableRow;
-            updatedContent = updatedContent.replace(parsedFile.tableContent, newTableContent);
+            // テーブルに新しい行を追加
+            const newTableRow = `| ${escapedTitle} | ${articleData.url} | ${escapedSummary} | ${date} |`;
+            
+            let updatedContent = existingContent;
+
+            // テーブルの更新
+            if (parsedFile.tableContent) {
+                // テーブルセクションの終了位置を正しく認識
+                const tableEndRegex = /(\|\s*タイトル\s*\|[\s\S]*?)(\n---\n.*Generated by ReadLater|$)/;
+                const tableEndMatch = updatedContent.match(tableEndRegex);
+                
+                if (tableEndMatch) {
+                    const tableSection = tableEndMatch[1];
+                    const afterTable = tableEndMatch[2];
+                    // テーブルセクション内の最後の行の後に新しい行を追加
+                    // 空行を削除してから新しい行を追加
+                    const cleanTableSection = tableSection.replace(/\n+$/, '');
+                    const newTableSection = cleanTableSection + '\n' + newTableRow;
+                    updatedContent = updatedContent.replace(tableEndMatch[0], newTableSection + afterTable);
+                } else {
+                    // フォールバック: 既存の方法
+                    const newTableContent = parsedFile.tableContent + '\n' + newTableRow;
+                    updatedContent = updatedContent.replace(parsedFile.tableContent, newTableContent);
+                }
+            } else {
+                // テーブルが見つからない場合は、テーブル全体を再構築
+                const tableHeader = `| タイトル | URL | 要約 | 日時 |
+|---------|-----|------|------|`;
+                const newTableContent = tableHeader + '\n' + newTableRow;
+                updatedContent = updatedContent.replace(
+                    /# ReadLater Articles\n\n/,
+                    `# ReadLater Articles\n\n${newTableContent}\n\n`
+                );
+            }
+
+            // 記事詳細セクションは追加しない（テーブルのみ）
+
+            return updatedContent;
+            
+        } catch (error) {
+            const errorResult = this.errorHandler.handleError(
+                new Error(`既存ファイルへの記事追加に失敗: ${error.message}`),
+                { operation: 'appendArticleToExisting', articleTitle: articleData?.title }
+            );
+            throw error;
         }
-
-        // 記事詳細セクションに追加
-        let articleContent;
-        if (articleData.translatedContent && !articleData.translationSkipped) {
-            articleContent = `## 翻訳済み内容
-
-${articleData.translatedContent}
-
-<details>
-<summary>原文を表示</summary>
-
-${articleData.content || 'コンテンツが取得できませんでした。'}
-
-</details>`;
-        } else {
-            articleContent = `## 内容
-
-${articleData.content || 'コンテンツが取得できませんでした。'}`;
-        }
-
-        const summarySection = articleData.summary ? `\n## 要約\n\n${articleData.summary}` : '';
-
-        const articleDetail = `\n### ${articleData.title}
-
-**元記事**: [${articleData.title}](${articleData.url})
-**保存日**: ${date}${summarySection}
-
-${articleContent}
-`;
-
-        // 詳細セクションの最後に追加
-        const detailSectionRegex = /(## 記事詳細[\s\S]*?)(\n---\n.*Generated by ReadLater|$)/;
-        const detailMatch = updatedContent.match(detailSectionRegex);
-        
-        if (detailMatch) {
-            const updatedDetailSection = detailMatch[1] + articleDetail + '\n';
-            updatedContent = updatedContent.replace(detailMatch[1], updatedDetailSection);
-        } else {
-            // 詳細セクションが見つからない場合は最後に追加
-            updatedContent += `\n## 記事詳細${articleDetail}`;
-        }
-
-        return updatedContent;
     }
 
     /**
@@ -245,35 +356,79 @@ ${articleContent}
             return false;
         }
 
-        // 必要なセクションの存在確認
-        const hasTitle = /^# /.test(content.trim());
+        // タイトルとテーブルの存在をチェック
+        const hasTitle = (/^# /.test(content) || /\n# /.test(content));
         const hasTable = /\| タイトル \|/.test(content);
-        const hasDetails = /## 記事詳細/.test(content);
 
-        return hasTitle && (hasTable || hasDetails);
+        return hasTitle && hasTable;
     }
 
     /**
-     * ファイル読み込み（モック対応）
+     * Native Messageをラップする互換性ヘルパー（Promise/コールバック両対応）
+     * @param {Object} payload - 送信するメッセージ
+     * @returns {Promise<Object>} レスポンス
+     */
+    async _sendNativeMessage(payload) {
+        return await new Promise((resolve, reject) => {
+            chrome.runtime.sendNativeMessage('com.readlater.claude_host', payload, (response) => {
+                if (chrome.runtime.lastError) {
+                    return reject(new Error(chrome.runtime.lastError.message));
+                }
+                resolve(response);
+            });
+        });
+    }
+
+    /**
+     * ファイル読み込み（ネイティブメッセージング対応）
      * @param {string} filePath - ファイルパス
      * @returns {Promise<string>} ファイル内容
      */
     async readFile(filePath) {
-        // 実装は後でNative Messagingに接続
-        // テスト用のモックポイント
-        throw new Error('File not found');
+        try {
+            // ネイティブメッセージングでファイル読み込み
+            const response = await this._sendNativeMessage({
+                type: 'readFile',
+                filePath: filePath
+            });
+            
+            if (response && response.success) {
+                return response.content || '';
+            } else {
+                throw new Error(response?.error || 'ファイル読み込みに失敗しました');
+            }
+        } catch (error) {
+            // ファイルが存在しない場合は空文字列を返す
+            if (error.message.includes('ENOENT') || error.message.includes('not found')) {
+                return '';
+            }
+            throw error;
+        }
     }
 
     /**
-     * ファイル書き込み（モック対応）
+     * ファイル書き込み（ネイティブメッセージング対応）
      * @param {string} filePath - ファイルパス
      * @param {string} content - ファイル内容
      * @returns {Promise<Object>} 書き込み結果
      */
     async writeFile(filePath, content) {
-        // 実装は後でNative Messagingに接続
-        // テスト用のモックポイント
-        return { success: true };
+        try {
+            // ネイティブメッセージングでファイル書き込み
+            const response = await this._sendNativeMessage({
+                type: 'writeFile',
+                filePath: filePath,
+                content: content
+            });
+            
+            if (response && response.success) {
+                return { success: true, filePath: response.filePath };
+            } else {
+                throw new Error(response?.error || 'ファイル書き込みに失敗しました');
+            }
+        } catch (error) {
+            throw new Error(`ファイル書き込みエラー: ${error.message}`);
+        }
     }
 }
 
@@ -282,9 +437,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = { AggregatedFileManager };
 } else {
     // ブラウザ環境での利用
-    if (typeof self !== 'undefined') {
-        self.AggregatedFileManager = AggregatedFileManager;
-    } else if (typeof window !== 'undefined') {
-        window.AggregatedFileManager = AggregatedFileManager;
-    }
+    const g = (typeof self !== 'undefined') ? self : 
+              (typeof window !== 'undefined') ? window : globalThis;
+    g.AggregatedFileManager = AggregatedFileManager;
 }

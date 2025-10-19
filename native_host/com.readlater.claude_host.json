@@ -1,0 +1,10 @@
+{
+  "name": "com.readlater.claude_host",
+  "description": "ReadLater for Obsidian - Claude CLI Native Messaging Host",
+  "path": "/ABSOLUTE/PATH/TO/claude_host.js",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://YOUR_EXTENSION_ID/"
+  ]
+}
+

@@ -1,5 +1,11 @@
 /* ReadLater for Obsidian - Options Page Styles */
 
+/* Conditional required fields */
+.conditional-required {
+    color: #e74c3c;
+    font-weight: bold;
+}
+
 * {
     margin: 0;
     padding: 0;

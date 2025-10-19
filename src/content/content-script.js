@@ -33,6 +33,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         
         // 非同期レスポンスのため true を返す
         return true;
+    } else if (request.action === 'ping') {
+        sendResponse({ ok: true });
+        return; 
     }
 });
 

@@ -3,14 +3,32 @@
 
 console.log('ReadLater for Obsidian: Options page loaded');
 
+/**
+ * クロスプラットフォーム対応の絶対パス判定
+ * @param {string} p - 判定するパス
+ * @returns {boolean} 絶対パスの場合true
+ */
+function isAbsolutePath(p) {
+    if (!p) return false;
+    // Windows: C:\... または \\server\share (UNC)
+    // Unix/Mac: /...
+    return /^([a-zA-Z]:\\|\\\\|\/)/.test(p);
+}
+
 // DOM要素の取得
 const elements = {
     // 入力フィールド
     obsidianPath: document.getElementById('obsidian-path'),
-    translationEnabled: document.getElementById('translation-enabled'),
     summaryEnabled: document.getElementById('summary-enabled'),
-    targetLanguage: document.getElementById('target-language'),
     fileNaming: document.getElementById('file-naming'),
+    
+    // 集約保存設定
+    aggregatedSavingEnabled: document.getElementById('aggregated-saving-enabled'),
+    aggregatedFileName: document.getElementById('aggregated-file-name'),
+    
+    // Slack通知設定
+    slackNotificationEnabled: document.getElementById('slack-notification-enabled'),
+    slackWebhookUrl: document.getElementById('slack-webhook-url'),
     
     // ボタン
     testClaudeConnection: document.getElementById('test-claude-connection'),
@@ -28,10 +46,12 @@ const elements = {
 // デフォルト設定
 const defaultSettings = {
     obsidianPath: 'ReadLater',
-    translationEnabled: true,
     summaryEnabled: true,
-    targetLanguage: 'ja',
-    fileNaming: 'date-title'
+    fileNaming: 'date-title',
+    aggregatedSavingEnabled: false,
+    aggregatedFileName: 'ReadLater_Articles.md',
+    slackNotificationEnabled: false,
+    slackWebhookUrl: ''
 };
 
 // ページ読み込み時の初期化
@@ -63,10 +83,22 @@ async function loadSettings() {
         
         // フォームに設定値を反映
         elements.obsidianPath.value = settings.obsidianPath || defaultSettings.obsidianPath;
-        elements.translationEnabled.checked = settings.translationEnabled !== false;
         elements.summaryEnabled.checked = settings.summaryEnabled !== false;
-        elements.targetLanguage.value = settings.targetLanguage || defaultSettings.targetLanguage;
         elements.fileNaming.value = settings.fileNaming || defaultSettings.fileNaming;
+        
+        // 集約保存設定の反映
+        elements.aggregatedSavingEnabled.checked = settings.aggregatedSavingEnabled === true;
+        elements.aggregatedFileName.value = settings.aggregatedFileName || defaultSettings.aggregatedFileName;
+        
+        // Slack通知設定の反映
+        elements.slackNotificationEnabled.checked = settings.slackNotificationEnabled === true;
+        elements.slackWebhookUrl.value = settings.slackWebhookUrl || defaultSettings.slackWebhookUrl;
+        
+        // 集約保存設定のUI状態更新
+        updateAggregatedSavingUI();
+        
+        // Slack通知設定のUI状態更新
+        updateSlackNotificationUI();
         
     } catch (error) {
         console.error('ReadLater for Obsidian: Error loading settings', error);
@@ -84,10 +116,12 @@ async function checkClaudeCLIStatus() {
             action: 'checkClaudeCLIStatus'
         });
         
-        if (response && response.success) {
+        if (response?.available) {
             updateClaudeStatus('success', '✅ Claude CLI利用可能', 'Claude CLIが正常にインストールされています');
-        } else {
+        } else if (response?.success === false || response?.available === false) {
             updateClaudeStatus('error', '❌ Claude CLI未インストール', 'Claude CLIをインストールしてください');
+        } else {
+            updateClaudeStatus('warning', '⚠️ 状態不明', 'Claude CLIの状態を確認できませんでした');
         }
     } catch (error) {
         console.error('ReadLater for Obsidian: Failed to check Claude CLI status', error);
@@ -113,9 +147,6 @@ function updateClaudeStatus(type, icon, text) {
  * イベントリスナーの設定
  */
 function setupEventListeners() {
-    // APIキー表示/非表示の切り替え
-    elements.toggleApiKey.addEventListener('click', toggleApiKeyVisibility);
-    
     // 接続テストボタン
     elements.testClaudeConnection.addEventListener('click', testClaudeConnection);
     elements.testFileSave.addEventListener('click', testFileSave);
@@ -126,17 +157,20 @@ function setupEventListeners() {
     
     // リアルタイム検証
     elements.obsidianPath.addEventListener('input', validateCurrentSettings);
-    elements.claudeApiKey.addEventListener('input', validateCurrentSettings);
+    
+    // 集約保存設定の変更時イベント
+    elements.aggregatedSavingEnabled.addEventListener('change', updateAggregatedSavingUI);
+    elements.aggregatedFileName.addEventListener('input', validateCurrentSettings);
+    
+    // Slack通知設定の変更時イベント
+    elements.slackNotificationEnabled.addEventListener('change', updateSlackNotificationUI);
+    elements.slackWebhookUrl.addEventListener('input', validateCurrentSettings);
 }
 
 /**
  * APIキーの表示/非表示切り替え
  */
-function toggleApiKeyVisibility() {
-    const isPassword = elements.claudeApiKey.type === 'password';
-    elements.claudeApiKey.type = isPassword ? 'text' : 'password';
-    elements.toggleApiKey.textContent = isPassword ? '🙈' : '👁️';
-}
+// APIキー入力は不要（ネイティブメッセージング利用のため）
 
 /**
  * Claude CLI接続テスト
@@ -154,24 +188,15 @@ async function testClaudeConnection() {
     result.textContent = 'Claude CLI接続をテストしています...';
     
     try {
-        const apiKey = elements.claudeApiKey.value.trim();
-        
-        if (!apiKey) {
-            throw new Error('APIキーが入力されていません');
+        // Service Worker経由でネイティブホストの状態確認
+        const resp = await chrome.runtime.sendMessage({ action: 'checkClaudeCLIStatus' });
+        if (resp && resp.available) {
+            result.className = 'test-result success';
+            const ver = resp.version ? `（${resp.version}）` : '';
+            result.textContent = `✅ ネイティブホスト接続OK${ver}`;
+        } else {
+            throw new Error(resp?.message || 'ネイティブホストに接続できません');
         }
-        
-        if (!apiKey.startsWith('sk-')) {
-            throw new Error('APIキーの形式が正しくありません');
-        }
-        
-        // TODO: Sprint 3で実際のClaude CLI接続テストを実装
-        // 現在は模擬テスト
-        await new Promise(resolve => setTimeout(resolve, 2000)); // 2秒待機
-        
-        // 成功パターン（実際の実装では Claude CLI を呼び出し）
-        result.className = 'test-result success';
-        result.textContent = '✅ Claude CLI接続に成功しました！翻訳・要約機能が利用できます。';
-        
     } catch (error) {
         console.error('ReadLater for Obsidian: Claude connection test failed', error);
         result.className = 'test-result error';
@@ -224,21 +249,47 @@ ${new Date().toLocaleString('ja-JP')}
 *Generated by ReadLater for Obsidian - Settings Test*
 `;
         
-        // ファイル保存の実行
-        const filename = path ? `${path}/readlater-test-${Date.now()}.md` : `readlater-test-${Date.now()}.md`;
-        
-        chrome.downloads.download({
-            url: 'data:text/plain;charset=utf-8,' + encodeURIComponent(testMarkdown),
-            filename: filename,
-            saveAs: false
-        }, (downloadId) => {
-            if (chrome.runtime.lastError) {
-                throw new Error(chrome.runtime.lastError.message);
-            }
-            
+        // 保存方式を切り替え
+        const isAbsolute = isAbsolutePath(path);
+        const fnameOnly = `readlater-test-${Date.now()}.md`;
+
+        if (isAbsolute) {
+            // ネイティブホストで直接保存
+            const resp = await new Promise((resolve, reject) => {
+                // filePath を構築（baseDir と filename を結合）
+                const fullPath = path.replace(/[\/\\]+$/, '') + '/' + fnameOnly;
+                chrome.runtime.sendNativeMessage('com.readlater.claude_host', {
+                    type: 'writeFile',
+                    filePath: fullPath,
+                    content: testMarkdown,
+                    encoding: 'utf8'
+                }, (r) => {
+                    if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+                    if (!r || r.ok === false) return reject(new Error(r?.error || 'Native host write failed'));
+                    resolve(r);
+                });
+            });
+
             result.className = 'test-result success';
-            result.textContent = `✅ ファイル保存に成功しました！テストファイルがダウンロードフォルダの「${filename}」に保存されました。`;
-        });
+            result.textContent = `✅ ファイル保存に成功しました！「${resp.filePath}」に保存されました。`;
+
+        } else {
+            // Downloads APIで保存（相対パス）
+            const filename = path ? `${path}/${fnameOnly}` : fnameOnly;
+            const downloadId = await new Promise((resolve, reject) => {
+                chrome.downloads.download({
+                    url: 'data:text/plain;charset=utf-8,' + encodeURIComponent(testMarkdown),
+                    filename,
+                    saveAs: false
+                }, (id) => {
+                    if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+                    if (!id) return reject(new Error('Download failed'));
+                    resolve(id);
+                });
+            });
+            result.className = 'test-result success';
+            result.textContent = `✅ ファイル保存に成功しました！ダウンロードフォルダの「${filename}」に保存されました。`;
+        }
         
     } catch (error) {
         console.error('ReadLater for Obsidian: File save test failed', error);
@@ -262,12 +313,13 @@ async function saveSettings() {
         
         // 入力値の取得と検証
         const settings = {
-            claudeApiKey: elements.claudeApiKey.value.trim(),
             obsidianPath: elements.obsidianPath.value.trim(),
-            translationEnabled: elements.translationEnabled.checked,
             summaryEnabled: elements.summaryEnabled.checked,
-            targetLanguage: elements.targetLanguage.value,
-            fileNaming: elements.fileNaming.value
+            fileNaming: elements.fileNaming.value,
+            aggregatedSavingEnabled: elements.aggregatedSavingEnabled.checked,
+            aggregatedFileName: elements.aggregatedFileName.value.trim(),
+            slackNotificationEnabled: elements.slackNotificationEnabled.checked,
+            slackWebhookUrl: elements.slackWebhookUrl.value.trim()
         };
         
         // 基本的な検証
@@ -275,14 +327,41 @@ async function saveSettings() {
             throw new Error('保存先フォルダが入力されていません');
         }
         
-        if (settings.translationEnabled || settings.summaryEnabled) {
-            if (!settings.claudeApiKey) {
-                throw new Error('翻訳・要約機能を使用する場合はAPIキーが必要です');
+        // 集約保存設定の検証
+        if (settings.aggregatedSavingEnabled && !settings.aggregatedFileName) {
+            throw new Error('集約ファイル名が入力されていません');
+        }
+        
+        if (settings.aggregatedFileName) {
+            // パス区切り文字のチェック
+            if (/[\\/]/.test(settings.aggregatedFileName)) {
+                throw new Error('集約ファイル名に/や\\は使用できません');
             }
-            if (!settings.claudeApiKey.startsWith('sk-')) {
-                throw new Error('APIキーの形式が正しくありません');
+            
+            // 危険文字の除去
+            settings.aggregatedFileName = settings.aggregatedFileName
+                .replace(/[<>:"/\\|?*]/g, '')   // 危険文字除去
+                .replace(/^\.+/, '');           // 先頭ドット除去
+            
+            // 拡張子の追加
+            if (!settings.aggregatedFileName.endsWith('.md')) {
+                settings.aggregatedFileName += '.md';
             }
         }
+        
+        // Slack通知設定の検証
+        if (settings.slackNotificationEnabled) {
+            if (!settings.slackWebhookUrl) {
+                throw new Error('Slack Webhook URLが入力されていません');
+            }
+            
+            // Webhook URLの形式チェック
+            if (!settings.slackWebhookUrl.startsWith('https://hooks.slack.com/')) {
+                throw new Error('Slack Webhook URLの形式が正しくありません');
+            }
+        }
+        
+        // APIキーは不要（ネイティブメッセージング利用のため）
         
         // 設定の保存
         await chrome.storage.sync.set({ readlaterSettings: settings });
@@ -336,9 +415,10 @@ async function resetSettings() {
  */
 function validateCurrentSettings() {
     const path = elements.obsidianPath.value.trim();
-    const apiKey = elements.claudeApiKey.value.trim();
-    const translationEnabled = elements.translationEnabled.checked;
-    const summaryEnabled = elements.summaryEnabled.checked;
+    const aggregatedSavingEnabled = elements.aggregatedSavingEnabled.checked;
+    const aggregatedFileName = elements.aggregatedFileName.value.trim();
+    const slackNotificationEnabled = elements.slackNotificationEnabled.checked;
+    const slackWebhookUrl = elements.slackWebhookUrl.value.trim();
     
     let isValid = true;
     let message = '';
@@ -347,12 +427,18 @@ function validateCurrentSettings() {
     if (!path) {
         isValid = false;
         message = '保存先フォルダは必須です';
-    } else if ((translationEnabled || summaryEnabled) && !apiKey) {
+    }
+    
+    // 集約保存設定の確認
+    if (aggregatedSavingEnabled && !aggregatedFileName) {
         isValid = false;
-        message = '翻訳・要約機能を使用する場合はAPIキーが必要です';
-    } else if (apiKey && !apiKey.startsWith('sk-')) {
+        message = '集約ファイル名は必須です';
+    }
+    
+    // Slack通知設定の確認
+    if (slackNotificationEnabled && !slackWebhookUrl) {
         isValid = false;
-        message = 'APIキーの形式が正しくありません';
+        message = 'Slack Webhook URLは必須です';
     }
     
     // 保存ボタンの有効/無効切り替え
@@ -377,10 +463,42 @@ function showStatusMessage(message, type = 'info') {
     }, 3000);
 }
 
+/**
+ * 集約保存設定UIの状態更新
+ */
+function updateAggregatedSavingUI() {
+    const isEnabled = elements.aggregatedSavingEnabled.checked;
+    
+    // 集約ファイル名入力フィールドの有効/無効切り替え
+    elements.aggregatedFileName.disabled = !isEnabled;
+    
+    // 設定の検証を再実行
+    validateCurrentSettings();
+    
+    console.log('ReadLater for Obsidian: Aggregated saving UI updated', { enabled: isEnabled });
+}
+
+/**
+ * Slack通知設定UIの状態更新
+ */
+function updateSlackNotificationUI() {
+    const isEnabled = elements.slackNotificationEnabled.checked;
+    
+    // Slack Webhook URL入力フィールドの有効/無効切り替え
+    elements.slackWebhookUrl.disabled = !isEnabled;
+    
+    // 設定の検証を再実行
+    validateCurrentSettings();
+    
+    console.log('ReadLater for Obsidian: Slack notification UI updated', { enabled: isEnabled });
+}
+
 // デバッグ用関数の公開
 window.readlaterOptionsDebug = {
     loadSettings,
     saveSettings,
     resetSettings,
-    validateCurrentSettings
+    validateCurrentSettings,
+    updateAggregatedSavingUI,
+    updateSlackNotificationUI
 };

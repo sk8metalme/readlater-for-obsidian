@@ -115,8 +115,21 @@ class ArticleExtractor {
         for (const filter of this.contentFilters) {
             content = filter.apply(content);
         }
-        
-        return this.postProcessContent(content);
+        content = this.postProcessContent(content);
+
+        // うまく抽出できなかった場合のフォールバック（段落集約）
+        if (!content || content.length < 200) {
+            try {
+                const aggregated = this.aggregateParagraphs();
+                if (aggregated && aggregated.length > content.length) {
+                    return aggregated;
+                }
+            } catch (e) {
+                console.debug('Paragraph aggregation failed', e);
+            }
+        }
+
+        return content;
     }
     
     /**
@@ -252,6 +265,101 @@ class ArticleExtractor {
         
         return '';
     }
+
+    async extractModifiedDate() {
+        const dateCandidates = [
+            () => this.extractFromJsonLd('dateModified'),
+            () => this.getMetaContent('property', 'article:modified_time'),
+            () => this.getMetaContent('property', 'og:updated_time'),
+            () => document.querySelector('time[itemprop="dateModified"][datetime]')?.getAttribute('datetime'),
+        ];
+
+        for (const extractor of dateCandidates) {
+            try {
+                const date = extractor();
+                if (date && this.isValidDate(date)) {
+                    return new Date(date).toISOString();
+                }
+            } catch (_) { /* noop */ }
+        }
+        return 'Unknown';
+    }
+
+    async extractKeywords() {
+        const candidates = [
+            () => this.extractFromJsonLd('keywords'), // may be string or array
+            () => this.getMetaContent('name', 'keywords'),
+            () => this.getMetaContent('property', 'article:tag')
+        ];
+        for (const extractor of candidates) {
+            try {
+                const v = extractor();
+                if (!v) continue;
+                if (Array.isArray(v)) {
+                    return v.map(x => String(x).trim()).filter(Boolean);
+                }
+                if (typeof v === 'string') {
+                    return v.split(',').map(s => s.trim()).filter(Boolean);
+                }
+            } catch (_) { /* noop */ }
+        }
+        return [];
+    }
+
+    async extractImages() {
+        const urls = new Set();
+        // og:image
+        const og = this.getMetaContent('property', 'og:image');
+        if (og) urls.add(og);
+        // prominent images inside article/main
+        const containers = document.querySelectorAll('article, main, .entry-content, .post-content');
+        containers.forEach(c => {
+            c.querySelectorAll('img[src]').forEach(img => {
+                const src = img.getAttribute('src');
+                if (src && src.length > 4) urls.add(src);
+            });
+        });
+        return Array.from(urls).slice(0, 10);
+    }
+
+    async extractLinks() {
+        const links = [];
+        const containers = document.querySelectorAll('article, main, .entry-content, .post-content, .content');
+        const seen = new Set();
+        containers.forEach(c => {
+            c.querySelectorAll('a[href]').forEach(a => {
+                const href = a.getAttribute('href');
+                if (!href || seen.has(href)) return;
+                seen.add(href);
+                links.push({ href, text: (a.textContent || '').trim().slice(0, 120) });
+            });
+        });
+        return links.slice(0, 50);
+    }
+
+    async extractCategory() {
+        const candidates = [
+            () => this.extractFromJsonLd('articleSection'),
+            () => this.getMetaContent('property', 'article:section'),
+        ];
+        for (const extractor of candidates) {
+            try {
+                const v = extractor();
+                if (v && typeof v === 'string') return v;
+            } catch (_) { /* noop */ }
+        }
+        return '';
+    }
+
+    async extractTags() {
+        // Often overlaps with keywords; try to infer from DOM
+        const tagSelectors = ['.tags a', '.post-tags a', 'a[rel="tag"]'];
+        for (const sel of tagSelectors) {
+            const arr = Array.from(document.querySelectorAll(sel)).map(a => a.textContent?.trim()).filter(Boolean);
+            if (arr.length) return arr.slice(0, 20);
+        }
+        return [];
+    }
     
     async extractLanguage() {
         return document.documentElement.lang || 
@@ -314,6 +422,30 @@ class ArticleExtractor {
         content = content.replace(/(.{100,}?)\s+/g, '$1\n');
         
         return content;
+    }
+
+    /**
+     * ページ全体から段落を集約（最終フォールバック）
+     */
+    aggregateParagraphs() {
+        const container = document.querySelector('article, main, .entry-content, .post-content, #content, .content') || document.body;
+        const texts = [];
+        const seen = new Set();
+        const nodes = container.querySelectorAll('p, li');
+        for (const n of nodes) {
+            let t = (n.textContent || '').trim();
+            if (!t) continue;
+            // ノイズ除去
+            if (t.length < 40) continue;
+            if (/^(Share|Tweet|Like|Follow|広告|スポンサー|Advertisement|Subscribe)\b/i.test(t)) continue;
+            const key = t.slice(0, 60);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            texts.push(t);
+            if (texts.length >= 200) break;
+        }
+        const joined = texts.join('\n\n');
+        return this.postProcessContent(joined);
     }
 }
 

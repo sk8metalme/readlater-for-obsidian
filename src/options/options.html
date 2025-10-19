@@ -15,7 +15,7 @@
 
         <main class="main-content">
             <!-- 設定保存状況の表示 -->
-            <div id="status-message" class="status-message" style="display: none;"></div>
+            <div id="status-message" class="status-message" style="display: none;" role="status" aria-live="polite"></div>
 
             <!-- 基本設定セクション -->
             <section class="settings-section">
@@ -33,7 +33,10 @@
                         placeholder="例: ReadLater または Downloads/ReadLater"
                     >
                     <div class="setting-help">
-                        記事を保存するフォルダ名を指定してください。ダウンロードフォルダ内の相対パスで指定できます。
+                        記事を保存するフォルダを指定します。<br>
+                        - 例1: <code>ReadLater</code>（ダウンロード内のサブフォルダ）<br>
+                        - 例2: <code>/Users/あなたのユーザー名/Library/Mobile Documents/iCloud~md~obsidian/Documents</code>（絶対パス）<br>
+                        絶対パスを指定した場合はネイティブホスト経由で直接保存されます。
                     </div>
                 </div>
             </section>
@@ -69,17 +72,6 @@
                     
                     <div class="checkbox-group">
                         <label class="checkbox-label">
-                            <input type="checkbox" id="translation-enabled" checked>
-                            <span class="checkmark"></span>
-                            翻訳機能を有効にする
-                        </label>
-                        <div class="setting-help-small">
-                            外国語の記事を日本語に翻訳します
-                        </div>
-                    </div>
-
-                    <div class="checkbox-group">
-                        <label class="checkbox-label">
                             <input type="checkbox" id="summary-enabled" checked>
                             <span class="checkmark"></span>
                             要約機能を有効にする
@@ -91,22 +83,48 @@
                 </div>
             </section>
 
+            <!-- 記事保存設定セクション -->
+            <section class="settings-section">
+                <h2>📄 記事保存設定</h2>
+                
+                <div class="setting-group">
+                    <label class="setting-label">💾 保存方式</label>
+                    
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="aggregated-saving-enabled">
+                            <span class="checkmark"></span>
+                            集約保存を有効にする
+                        </label>
+                        <div class="setting-help-small">
+                            複数の記事を1つのMarkdownファイルに集約して保存します。無効の場合は記事ごとに個別ファイルで保存されます。
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <label for="aggregated-file-name" class="setting-label">
+                        📋 集約ファイル名
+                        <span class="conditional-required">*</span>
+                    </label>
+                    <input 
+                        type="text" 
+                        id="aggregated-file-name" 
+                        class="setting-input" 
+                        placeholder="例: ReadLater_Articles.md"
+                        disabled
+                    >
+                    <div class="setting-help">
+                        集約保存時に使用するMarkdownファイル名を指定します。<br>
+                        拡張子(.md)は自動的に追加されます。
+                    </div>
+                </div>
+            </section>
+
             <!-- 詳細設定セクション -->
             <section class="settings-section">
                 <h2>⚙️ 詳細設定</h2>
                 
-                <div class="setting-group">
-                    <label for="target-language" class="setting-label">🈁 翻訳先言語</label>
-                    <select id="target-language" class="setting-select">
-                        <option value="ja">日本語</option>
-                        <option value="en">English</option>
-                        <option value="zh">中文</option>
-                        <option value="ko">한국어</option>
-                    </select>
-                    <div class="setting-help">
-                        記事を翻訳する際の対象言語を選択してください
-                    </div>
-                </div>
 
                 <div class="setting-group">
                     <label for="file-naming" class="setting-label">📄 ファイル名形式</label>
@@ -116,7 +134,59 @@
                         <option value="title-only">タイトルのみ</option>
                     </select>
                     <div class="setting-help">
-                        保存するMarkdownファイルの命名規則を選択してください
+                        個別保存時のMarkdownファイルの命名規則を選択してください
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slack通知設定セクション -->
+            <section class="settings-section">
+                <h2>💬 Slack通知設定</h2>
+                
+                <div class="setting-group">
+                    <label class="setting-label">🔔 Slack通知</label>
+                    
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="slack-notification-enabled">
+                            <span class="checkmark"></span>
+                            Slack通知を有効にする
+                        </label>
+                        <div class="setting-help-small">
+                            記事保存時にSlackに通知を送信します（個別保存モードのみ）
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <label for="slack-webhook-url" class="setting-label">
+                        🔗 Slack Webhook URL
+                        <span class="conditional-required">*</span>
+                    </label>
+                    <input 
+                        type="password" 
+                        id="slack-webhook-url" 
+                        class="setting-input" 
+                        placeholder="例: https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+                        autocomplete="off"
+                        spellcheck="false"
+                        inputmode="url"
+                        disabled
+                    >
+                    <div class="setting-help">
+                        Slack通知を有効にする場合、Incoming Webhook URLを設定してください。<br>
+                        <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener">Slack Webhook URLの取得方法はこちら</a>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <div class="info-box">
+                        <h4>📋 通知内容</h4>
+                        <p>以下の情報がSlackに送信されます：</p>
+                        <ul>
+                            <li>記事のタイトル</li>
+                            <li>記事のURL</li>
+                        </ul>
                     </div>
                 </div>
             </section>
@@ -148,7 +218,7 @@
                     <ol class="usage-steps">
                         <li>保存したい記事のページで<strong>右クリック</strong></li>
                         <li><strong>「📖 後で読む（ReadLater）」</strong>を選択</li>
-                        <li>自動的に記事抽出→翻訳→要約→保存が実行されます</li>
+                        <li>自動的に記事抽出→要約→保存が実行されます</li>
                         <li>Obsidianの指定フォルダにMarkdownファイルが保存されます</li>
                     </ol>
                     
@@ -156,7 +226,6 @@
                         <h4>主な機能:</h4>
                         <ul>
                             <li>🔍 記事の自動抽出（タイトル、本文、メタデータ）</li>
-                            <li>🌐 多言語からの高品質翻訳（Claude CLI使用）</li>
                             <li>📝 AI要約による主要ポイントの抽出</li>
                             <li>📁 Obsidian対応Markdown形式での保存</li>
                             <li>⚡ ワンクリックでの簡単保存</li>
@@ -174,7 +243,7 @@
             
             <div class="footer-info">
                 <p>ReadLater for Obsidian v1.0.0</p>
-                <p>問題の報告: <a href="https://github.com/yourusername/readlater-for-obsidian/issues" target="_blank">GitHub Issues</a></p>
+                <p>問題の報告: <a href="https://github.com/sk8metalme/readlater-for-obsidian/issues" target="_blank" rel="noopener">GitHub Issues</a></p>
             </div>
         </footer>
     </div>

@@ -52,6 +52,8 @@ class ErrorHandler {
                 return this.handleValidationError(errorInfo);
             case 'TIMEOUT_ERROR':
                 return this.handleTimeoutError(errorInfo);
+            case 'AGGREGATED_FILE_ERROR':
+                return this.handleAggregatedFileError(errorInfo);
             case 'UNKNOWN_ERROR':
             default:
                 return this.handleUnknownError(errorInfo);
@@ -79,6 +81,11 @@ class ErrorHandler {
         // ストレージエラー
         if (message.includes('storage') || message.includes('quota') || message.includes('disk')) {
             return 'STORAGE_ERROR';
+        }
+        
+        // 集約ファイル関連エラー（新規追加）
+        if (message.includes('aggregated') || message.includes('集約') || message.includes('file conflict') || message.includes('parsing')) {
+            return 'AGGREGATED_FILE_ERROR';
         }
         
         // 権限エラー
@@ -118,6 +125,7 @@ class ErrorHandler {
             'API_ERROR': 'medium',
             'VALIDATION_ERROR': 'low',
             'TIMEOUT_ERROR': 'medium',
+            'AGGREGATED_FILE_ERROR': 'high',
             'UNKNOWN_ERROR': 'high'
         };
         
@@ -194,6 +202,15 @@ class ErrorHandler {
             canRetry: true,
             userMessage: '処理がタイムアウトしました。サーバーが混雑している可能性があります。',
             actionSuggestion: 'しばらく待ってから再試行してください。',
+            technicalMessage: errorInfo.message
+        };
+    }
+    
+    handleAggregatedFileError(errorInfo) {
+        return {
+            canRetry: true,
+            userMessage: '集約ファイルの操作に失敗しました。ファイルが破損している可能性があります。',
+            actionSuggestion: '個別保存モードに切り替えるか、集約ファイルを再作成してください。',
             technicalMessage: errorInfo.message
         };
     }
@@ -337,7 +354,8 @@ function setupGlobalErrorHandling() {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { ErrorHandler, NotificationErrorHandler, setupGlobalErrorHandling };
 } else {
-    window.ErrorHandler = ErrorHandler;
-    window.NotificationErrorHandler = NotificationErrorHandler;
-    window.setupGlobalErrorHandling = setupGlobalErrorHandling;
+    const g = (typeof self !== 'undefined') ? self : (typeof window !== 'undefined' ? window : globalThis);
+    g.ErrorHandler = ErrorHandler;
+    g.NotificationErrorHandler = NotificationErrorHandler;
+    g.setupGlobalErrorHandling = setupGlobalErrorHandling;
 }

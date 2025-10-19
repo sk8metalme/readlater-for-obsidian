@@ -144,12 +144,7 @@ class MarkdownGenerator {
             publish: false
         };
         
-        // Claude AI処理情報
-        if (articleData.translatedContent) {
-            frontmatter.translated = !articleData.translationSkipped;
-            frontmatter.translationSource = articleData.detectedLanguage;
-            frontmatter.translationDate = date;
-        }
+        // Translation functionality removed - no translation processing
         
         if (articleData.summary) {
             frontmatter.aiSummary = !articleData.summarySkipped;
@@ -259,7 +254,7 @@ class MarkdownGenerator {
         }
         
         // 翻訳された内容がある場合
-        const content = articleData.translatedContent || articleData.content || '';
+        const content = articleData.content || '';
         const wordCount = content.split(/\s+/).length;
         
         if (wordCount < 100) {
@@ -301,26 +296,9 @@ class MarkdownGenerator {
             sections.push(summarySection);
         }
         
-        // メインコンテンツ（翻訳優先）
-        if (articleData.translatedContent && !articleData.translationSkipped) {
-            sections.push('## 📖 翻訳済み記事内容\n');
-            sections.push(markdownContent);
-            
-            // 翻訳エラーがあれば注記
-            if (articleData.translationError) {
-                sections.push(`\n*⚠️ 翻訳処理中にエラーが発生しました: ${articleData.translationError}*\n`);
-            }
-            
-            // 原文も含める（折りたたみ形式）
-            if (articleData.content) {
-                sections.push('\n<details>\n<summary>📄 原文を表示</summary>\n\n');
-                sections.push(this.formatPlainTextAsMarkdown(articleData.content));
-                sections.push('\n</details>\n');
-            }
-        } else {
-            sections.push('## 📖 記事内容\n');
-            sections.push(markdownContent);
-        }
+        // メインコンテンツ（翻訳機能削除により、元のコンテンツのみ表示）
+        sections.push('## 📄 記事内容\n');
+        sections.push(markdownContent);
         
         // フッター
         sections.push(this.generateFooter(articleData));
@@ -590,6 +568,7 @@ function generateAliases(articleData) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { MarkdownGenerator, HTMLToMarkdownConverter };
 } else {
-    window.MarkdownGenerator = MarkdownGenerator;
-    window.HTMLToMarkdownConverter = HTMLToMarkdownConverter;
+    const g = (typeof self !== 'undefined') ? self : (typeof window !== 'undefined' ? window : globalThis);
+    g.MarkdownGenerator = MarkdownGenerator;
+    g.HTMLToMarkdownConverter = HTMLToMarkdownConverter;
 }
