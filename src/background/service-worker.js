@@ -1,14 +1,20 @@
-// ReadLater for Obsidian - Service Worker (ES Module)
+// ReadLater for Obsidian - Service Worker
 // Chrome拡張機能のバックグラウンド処理を管理
 
-// ESMとして静的インポート（副作用でself.*にエクスポートされる）
-import '../lib/native-messaging.js';
-import '../lib/markdown-generator.js';
-import '../lib/article-table-manager.js';
-import '../lib/aggregated-markdown-generator.js';
-import '../lib/aggregated-file-manager.js';
-import '../utils/error-handler.js';
-console.log('ReadLater for Obsidian: Libraries imported as modules');
+// Service Workerで必要な最小限のライブラリを読み込み
+// Note: markdown-generator.jsはContent Scriptで既に読み込まれているため除外
+try {
+    importScripts(
+        '../lib/native-messaging.js',
+        '../utils/error-handler.js',
+        '../lib/article-table-manager.js',
+        '../lib/aggregated-markdown-generator.js',
+        '../lib/aggregated-file-manager.js'
+    );
+    console.log('ReadLater for Obsidian: Libraries loaded successfully');
+} catch (error) {
+    console.error('ReadLater for Obsidian: Error loading libraries', error);
+}
 
 console.log('ReadLater for Obsidian: Service Worker initialized');
 
