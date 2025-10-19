@@ -43,11 +43,11 @@ function getClaudeCmd() {
 }
 
 function readMessage() {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const header = Buffer.alloc(4);
-    process.stdin.once('readable', () => {
+    const readHeader = () => {
       const h = process.stdin.read(4);
-      if (!h) return resolve(null);
+      if (h === null) { process.stdin.once('readable', readHeader); return; }
       h.copy(header);
       const len = header.readUInt32LE(0);
       
@@ -55,14 +55,14 @@ function readMessage() {
       const MAX_MESSAGE_SIZE = 10 * 1024 * 1024; // 10MB
       if (len === 0 || len > MAX_MESSAGE_SIZE) {
         console.error(`[claude_host] Invalid message length: ${len}`);
-        return resolve(null);
+        return resolve({ __parseError: true });
       }
       
       const chunks = [];
       let remaining = len;
-      function readChunk() {
+      const readChunk = () => {
         const chunk = process.stdin.read(Math.min(remaining, 65536)); // Read in smaller chunks
-        if (!chunk) return process.stdin.once('readable', readChunk);
+        if (chunk === null) { process.stdin.once('readable', readChunk); return; }
         chunks.push(chunk);
         remaining -= chunk.length;
         if (remaining <= 0) {
@@ -72,12 +72,13 @@ function readMessage() {
             resolve(msg);
           } catch (e) {
             console.error(`[claude_host] JSON parse error:`, e.message);
-            resolve(null);
+            resolve({ __parseError: true });
           }
         }
-      }
+      };
       readChunk();
-    });
+    };
+    readHeader();
   });
 }
 
@@ -153,7 +154,8 @@ async function handleMessage(msg) {
         if (content.length > 10 * 1024 * 1024) return err('Content too large');
         const home = os.homedir();
         const resolvedPath = path.resolve(filePath);
-        if (!resolvedPath.startsWith(home)) return err('File path outside home is not allowed');
+        const rel = path.relative(home, resolvedPath);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) return err('File path outside home is not allowed');
         await fsp.mkdir(path.dirname(resolvedPath), { recursive: true });
         await fsp.writeFile(resolvedPath, content, { encoding });
         const stats = await fsp.stat(resolvedPath);
@@ -164,7 +166,8 @@ async function handleMessage(msg) {
         if (!filePath) return err('Missing filePath');
         const home = os.homedir();
         const resolvedPath = path.resolve(filePath);
-        if (!resolvedPath.startsWith(home)) return err('File path outside home is not allowed');
+        const rel = path.relative(home, resolvedPath);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) return err('File path outside home is not allowed');
         try {
           const content = await fsp.readFile(resolvedPath, { encoding });
           const stats = await fsp.stat(resolvedPath);
@@ -192,7 +195,7 @@ function runClaude(prompt, timeoutMs = 60000) {
       '--model', 'sonnet', 
       '--max-turns', '1', 
       '--output-format', 'text',
-      '--dangerously-skip-permissions',  // Skip all permission checks for non-interactive execution
+      ...(process.env.CLAUDE_SKIP_PERMISSIONS === '1' ? ['--dangerously-skip-permissions'] : []),
       prompt
     ];
     const cmd = getClaudeCmd();
@@ -242,6 +245,7 @@ function runClaude(prompt, timeoutMs = 60000) {
       reject(new Error('Failed to spawn claude: ' + e.message));
     });
     
+    let timedOut = false;
     const to = setTimeout(() => {
       const elapsed = Date.now() - startTime;
       console.error(`[claude_host] TIMEOUT after ${elapsed}ms (configured: ${timeoutMs}ms)`, {
@@ -249,7 +253,9 @@ function runClaude(prompt, timeoutMs = 60000) {
         outputLength: out.length,
         errorLength: err.length
       });
+      timedOut = true;
       try { p.kill('SIGTERM'); } catch (_) {}
+      setTimeout(() => { try { p.kill('SIGKILL'); } catch (_) {} }, 3000);
     }, timeoutMs);
     
     p.on('close', (code) => {
@@ -262,7 +268,8 @@ function runClaude(prompt, timeoutMs = 60000) {
       });
       
       if (code === 0 && out.trim().length > 0) return resolve(out.trim());
-      reject(new Error(err || 'Claude CLI exited with code ' + code));
+      if (timedOut) return reject(new Error('Claude CLI timed out'));
+      reject(new Error(err || ('Claude CLI exited with code ' + code)));
     });
   });
 }
@@ -313,9 +320,13 @@ async function main() {
   // Loop to handle multiple messages until stdin closes
   while (true) {
     const msg = await readMessage();
-    if (!msg) {
-      console.error('[claude_host] No message received, exiting...');
+    if (msg === null) {
+      console.error('[claude_host] No message received (EOF), exiting...');
       break;
+    }
+    if (msg && msg.__parseError) {
+      writeMessage(err('Invalid message'));
+      continue;
     }
     const res = await handleMessage(msg);
     writeMessage(res);

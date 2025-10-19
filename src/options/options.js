@@ -116,10 +116,12 @@ async function checkClaudeCLIStatus() {
             action: 'checkClaudeCLIStatus'
         });
         
-        if (response && response.success) {
+        if (response?.available) {
             updateClaudeStatus('success', '✅ Claude CLI利用可能', 'Claude CLIが正常にインストールされています');
-        } else {
+        } else if (response?.success === false || response?.available === false) {
             updateClaudeStatus('error', '❌ Claude CLI未インストール', 'Claude CLIをインストールしてください');
+        } else {
+            updateClaudeStatus('warning', '⚠️ 状態不明', 'Claude CLIの状態を確認できませんでした');
         }
     } catch (error) {
         console.error('ReadLater for Obsidian: Failed to check Claude CLI status', error);
@@ -254,10 +256,11 @@ ${new Date().toLocaleString('ja-JP')}
         if (isAbsolute) {
             // ネイティブホストで直接保存
             const resp = await new Promise((resolve, reject) => {
+                // filePath を構築（baseDir と filename を結合）
+                const fullPath = path.replace(/[\/\\]+$/, '') + '/' + fnameOnly;
                 chrome.runtime.sendNativeMessage('com.readlater.claude_host', {
                     type: 'writeFile',
-                    baseDir: path,
-                    filename: fnameOnly,
+                    filePath: fullPath,
                     content: testMarkdown,
                     encoding: 'utf8'
                 }, (r) => {
@@ -273,18 +276,19 @@ ${new Date().toLocaleString('ja-JP')}
         } else {
             // Downloads APIで保存（相対パス）
             const filename = path ? `${path}/${fnameOnly}` : fnameOnly;
-            chrome.downloads.download({
-                url: 'data:text/plain;charset=utf-8,' + encodeURIComponent(testMarkdown),
-                filename: filename,
-                saveAs: false
-            }, (downloadId) => {
-                if (chrome.runtime.lastError) {
-                    throw new Error(chrome.runtime.lastError.message);
-                }
-                
-                result.className = 'test-result success';
-                result.textContent = `✅ ファイル保存に成功しました！ダウンロードフォルダの「${filename}」に保存されました。`;
+            const downloadId = await new Promise((resolve, reject) => {
+                chrome.downloads.download({
+                    url: 'data:text/plain;charset=utf-8,' + encodeURIComponent(testMarkdown),
+                    filename,
+                    saveAs: false
+                }, (id) => {
+                    if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+                    if (!id) return reject(new Error('Download failed'));
+                    resolve(id);
+                });
             });
+            result.className = 'test-result success';
+            result.textContent = `✅ ファイル保存に成功しました！ダウンロードフォルダの「${filename}」に保存されました。`;
         }
         
     } catch (error) {

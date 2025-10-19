@@ -14,8 +14,16 @@ class AggregatedFileManager {
         };
         
         // エラーハンドラーの初期化
-        this.errorHandler = new (typeof ErrorHandler !== 'undefined' ? ErrorHandler : 
-            require('../utils/error-handler.js').ErrorHandler)();
+        const EH =
+          (typeof ErrorHandler !== 'undefined')
+            ? ErrorHandler
+            : (typeof require === 'function'
+                ? require('../utils/error-handler.js').ErrorHandler
+                : null);
+        this.errorHandler = this.options.errorHandler || (EH ? new EH() : {
+          handleError: (e) => ({ error: e?.message }),
+          retry: async (fn) => fn()
+        });
     }
 
     /**
@@ -339,6 +347,24 @@ class AggregatedFileManager {
     }
 
     /**
+     * Native Messageをラップする互換性ヘルパー（Promise/コールバック両対応）
+     * @param {Object} payload - 送信するメッセージ
+     * @returns {Promise<Object>} レスポンス
+     */
+    async _sendNativeMessage(payload) {
+        try {
+            const maybe = chrome.runtime.sendNativeMessage('com.readlater.claude_host', payload);
+            if (maybe && typeof maybe.then === 'function') return await maybe;
+        } catch (_) { /* fallback */ }
+        return await new Promise((resolve, reject) => {
+            chrome.runtime.sendNativeMessage('com.readlater.claude_host', payload, (response) => {
+                if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+                resolve(response);
+            });
+        });
+    }
+
+    /**
      * ファイル読み込み（ネイティブメッセージング対応）
      * @param {string} filePath - ファイルパス
      * @returns {Promise<string>} ファイル内容
@@ -346,7 +372,7 @@ class AggregatedFileManager {
     async readFile(filePath) {
         try {
             // ネイティブメッセージングでファイル読み込み
-            const response = await chrome.runtime.sendNativeMessage('com.readlater.claude_host', {
+            const response = await this._sendNativeMessage({
                 type: 'readFile',
                 filePath: filePath
             });
@@ -374,7 +400,7 @@ class AggregatedFileManager {
     async writeFile(filePath, content) {
         try {
             // ネイティブメッセージングでファイル書き込み
-            const response = await chrome.runtime.sendNativeMessage('com.readlater.claude_host', {
+            const response = await this._sendNativeMessage({
                 type: 'writeFile',
                 filePath: filePath,
                 content: content

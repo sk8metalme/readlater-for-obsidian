@@ -236,11 +236,17 @@ ${articleData.content || '記事内容の抽出に失敗しました'}
 }
 
 /**
- * Markdownファイルの保存
- * @param {string} markdown - Markdownコンテンツ
- * @param {string} title - 記事タイトル
- * @param {Object} settings - ユーザー設定
+ * クロスプラットフォーム対応の絶対パス判定
+ * @param {string} p - 判定するパス
+ * @returns {boolean} 絶対パスの場合true
  */
+function isAbsolutePath(p) {
+    if (!p) return false;
+    // Windows: C:\... または \\server\share (UNC)
+    // Unix/Mac: /...
+    return /^([a-zA-Z]:[\\/]|\\\\|\/)/.test(p);
+}
+
 /**
  * Markdownファイルを保存
  * @param {string} markdown - 保存するMarkdownコンテンツ
@@ -251,7 +257,7 @@ ${articleData.content || '記事内容の抽出に失敗しました'}
 async function saveMarkdownFile(markdown, title, settings) {
     // If absolute path is provided, try native host write first
     try {
-        if (settings.obsidianPath && /^\//.test(settings.obsidianPath)) {
+        if (settings.obsidianPath && isAbsolutePath(settings.obsidianPath)) {
             const now = new Date();
             const dateStr = now.toISOString().split('T')[0];
             const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-');
@@ -338,8 +344,7 @@ async function saveMarkdownFile(markdown, title, settings) {
             });
             
             // Downloads APIでファイル保存
-            const isAbsolute = settings.obsidianPath && /^\//.test(settings.obsidianPath);
-            const dlFilename = (!settings.obsidianPath || isAbsolute) ? filename : `${settings.obsidianPath}/${filename}`;
+            const dlFilename = (!settings.obsidianPath || isAbsolutePath(settings.obsidianPath)) ? filename : `${settings.obsidianPath}/${filename}`;
             chrome.downloads.download({
                 url: 'data:text/plain;charset=utf-8,' + encodeURIComponent(markdown),
                 filename: dlFilename,
@@ -688,7 +693,7 @@ async function sendSlackNotification(title, url, summary, settings) {
             url: url.substring(0, 50),
             hasSummary: !!summary,
             summaryLength: summary ? summary.length : 0,
-            webhookUrl: settings.slackWebhookUrl.substring(0, 50) + '...'
+            webhookConfigured: !!settings.slackWebhookUrl
         });
         
         // 要約テキストを整形（Markdown見出しを除去し、Slackに適した形式に）
@@ -802,7 +807,7 @@ async function sendSlackNotification(title, url, summary, settings) {
                 status: response.status,
                 statusText: response.statusText,
                 responseBody: responseText,
-                webhookUrl: settings.slackWebhookUrl.substring(0, 50) + '...'
+                webhookConfigured: !!settings.slackWebhookUrl
             });
             
             // エラーメッセージの詳細化
