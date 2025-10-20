@@ -1,134 +1,148 @@
-# ReadLater for Obsidian - Slack通知機能のテスト手順
+# ReadLater for Obsidian - テストガイド
 
-## 前提条件
+このドキュメントは、ReadLater for Obsidianのテスト方法について説明します。
 
-1. Chrome拡張機能がインストールされている
-2. Slack Incoming Webhookが作成済み（[こちら](https://api.slack.com/messaging/webhooks)から作成）
+## 📋 目次
 
-## テスト手順
+1. [自動テスト](#自動テスト)
+2. [手動テスト](#手動テスト)
+3. [機能別テスト手順](#機能別テスト手順)
 
-### 1. 拡張機能の設定
+---
 
-1. Chromeで `chrome://extensions/` を開く
-2. 「開発者モード」をONにする
-3. 「ReadLater for Obsidian」の「詳細」をクリック
-4. 「拡張機能のオプション」をクリック
-5. 以下を設定：
+## 自動テスト
+
+### ユニットテスト・統合テスト（Jest）
+
+プロジェクトにはJestベースの自動テストが含まれています。
+
+#### テストの実行
+
+```bash
+# 全テストを実行
+npm test
+
+# ウォッチモード（変更時に自動実行）
+npm run test:watch
+
+# カバレッジレポート付き
+npm run test:coverage
+
+# TDD モード（詳細出力付きウォッチモード）
+npm run tdd
+```
+
+#### テストファイルの場所
+
+```
+tests/
+├── lib/                          # ユニットテスト
+│   ├── aggregated-file-manager.test.js
+│   ├── aggregated-markdown-generator.test.js
+│   ├── article-table-manager.test.js
+│   ├── claude-cli.test.js
+│   └── data-models.test.js
+├── integration/                  # 統合テスト
+│   └── aggregated-save.test.js
+└── setup.js                      # Jest セットアップ
+```
+
+#### カバレッジ目標
+
+- **Branches**: 80%
+- **Functions**: 80%
+- **Lines**: 80%
+- **Statements**: 80%
+
+---
+
+## 手動テスト
+
+自動化が難しい機能やブラウザ環境での動作確認には、手動テストを使用します。
+
+### 1. Claude CLI連携テスト
+
+#### 事前準備
+- Claude CLIがインストールされていること（`claude --version` が通ること）
+- Node.js 16+ がインストールされていること
+
+#### テスト実行
+
+```bash
+# Claude CLI対応版テスト（推奨）
+node tests/manual/claude-cli-local-test.js
+
+# オフラインモード（言語検出のみ）
+node tests/manual/claude-cli-local-test.js offline
+```
+
+#### 確認項目
+- ✅ 言語検出が正しく動作するか
+- ✅ Claude CLIが利用可能か
+- ✅ 要約生成が正しく動作するか
+- ✅ キーワード抽出が正しく動作するか
+
+詳細は `tests/manual/README.md` を参照してください。
+
+---
+
+### 2. ブラウザ統合テスト
+
+Chrome拡張機能として実際に動作確認を行います。
+
+#### 2.1 拡張機能の読み込み
+
+1. Chrome で `chrome://extensions/` を開く
+2. 「デベロッパーモード」を有効にする
+3. 「パッケージ化されていない拡張機能を読み込む」をクリック
+4. このプロジェクトのフォルダを選択
+
+#### 2.2 基本動作確認
+
+```bash
+# テストページを開く
+open tests/manual/browser-test.html
+```
+
+ブラウザでテストページを開いて以下を確認：
+- 右クリックメニューに「📖 後で読む（ReadLater）」が表示されること
+- クリック後に記事が抽出されること
+- 処理完了後に通知が表示されること
+
+#### 2.3 ネイティブホスト接続テスト
+
+1. オプションページを開く（`chrome://extensions/` → 「詳細」→「拡張機能のオプション」）
+2. 「🤖 Claude CLI接続テスト」をクリック
+3. 成功メッセージが表示されることを確認
+
+---
+
+### 3. Slack通知機能テスト
+
+Slack Incoming Webhook経由の通知機能をテストします。
+
+#### 事前準備
+- Slack Incoming Webhookを作成済みであること
+  - [Slack API: Incoming Webhooks](https://api.slack.com/messaging/webhooks)
+
+#### テスト手順
+
+##### 3.1 設定
+
+1. オプションページを開く
+2. 以下を設定：
    - ✅ **Slack通知を有効にする** をチェック
-   - 📝 **Slack Webhook URL** を入力（例: `https://hooks.slack.com/services/YOUR/WEBHOOK/URL`）
+   - 📝 **Slack Webhook URL** を入力
    - ⚠️ **集約保存を有効にする** は**チェックを外す**（個別保存モード）
-6. 「設定を保存」をクリック
+3. 「設定を保存」をクリック
 
-### 2. Service WorkerのDevToolsを開く
+##### 3.2 通知テスト
 
-1. `chrome://extensions/` に戻る
-2. 「ReadLater for Obsidian」の「Service Workerを検査」をクリック
-3. DevToolsが開きます
-4. **Consoleタブ**を選択
+1. テストページで記事を保存
+2. Service WorkerのDevToolsでログを確認
+3. Slackチャンネルに通知が届くことを確認
 
-### 3. テストページで記事保存をテスト
-
-1. ブラウザで以下のURLを開く：
-   ```
-   file:///Users/arigatatsuya/Work/git/readlater-for-obsidian/tests/manual/slack-test.html
-   ```
-
-2. ページ上で**右クリック**
-
-3. **「後で読む（ReadLater）」**を選択
-
-4. DevToolsのConsoleで以下のログを確認：
-
-   ```javascript
-   ✅ 期待されるログ:
-   
-   ReadLater for Obsidian: Context menu clicked readlater-save-article
-   ReadLater for Obsidian: Starting article save process
-   ReadLater for Obsidian: Article extraction successful
-   ReadLater for Obsidian: Processing extracted article
-   ReadLater for Obsidian: Starting AI processing via Native Host
-   ReadLater for Obsidian: Using individual saving mode
-   ReadLater for Obsidian: Sending Slack notification {title: "...", url: "..."}
-   ReadLater for Obsidian: Slack notification sent successfully
-   ReadLater for Obsidian: Notification created
-   ```
-
-5. **Slackのチャンネル**を確認：
-   - 📖 「記事を保存しました」というメッセージが届く
-   - タイトルとURLが表示される
-   - 保存日時が表示される
-
-### 4. エラー時の確認
-
-もし通知が送信されない場合、Consoleで以下を確認：
-
-```javascript
-❌ エラーの例:
-
-// 設定が無効な場合
-ReadLater for Obsidian: Slack notification skipped (disabled or no webhook URL)
-
-// Webhook URLが無効な場合
-ReadLater for Obsidian: Failed to send Slack notification
-Error: Slack API returned 404: Not Found
-
-// ネットワークエラーの場合
-ReadLater for Obsidian: Failed to send Slack notification
-TypeError: Failed to fetch
-```
-
-## トラブルシューティング
-
-### 問題1: 通知が送信されない
-
-**原因と解決策:**
-
-1. **Slack通知が無効**
-   - 設定画面で「Slack通知を有効にする」をチェック
-
-2. **Webhook URLが未設定または無効**
-   - 設定画面でWebhook URLを確認
-   - URLが `https://hooks.slack.com/` で始まることを確認
-
-3. **集約保存モードになっている**
-   - 設定画面で「集約保存を有効にする」のチェックを外す
-   - Slack通知は個別保存モードでのみ動作します
-
-4. **ネットワークエラー**
-   - インターネット接続を確認
-   - ファイアウォール設定を確認
-
-### 問題2: 記事は保存されるが通知が届かない
-
-**原因:**
-- Slack通知の失敗は記事保存を妨げません（仕様）
-
-**確認事項:**
-1. DevToolsのConsoleでSlack通知のエラーを確認
-2. Webhook URLが正しいか確認
-3. SlackのIncoming Webhookが有効か確認
-
-### 問題3: DevToolsが開けない
-
-**解決策:**
-1. `chrome://extensions/` を開く
-2. 拡張機能の「削除」→「再読み込み」
-3. 「Service Workerを検査」をクリック
-
-## 期待される動作
-
-### 正常なフロー
-
-```
-1. ユーザーが右クリック → 「後で読む」を選択
-2. 記事が抽出される
-3. AI処理（要約）が実行される
-4. Markdownファイルが保存される
-5. ✅ Slackに通知が送信される
-6. Chrome通知が表示される
-```
-
-### Slack通知の内容
+#### 期待される通知内容
 
 ```
 📖 記事を保存しました
@@ -139,85 +153,169 @@ TypeError: Failed to fetch
 URL:
 [記事のURL]（クリック可能）
 
-保存日時: 2025/10/14 22:34:56
+要約:
+[AI生成要約]
+
+保存日時: 2025/10/19 22:34:56
 ```
 
-## 追加のテストケース
-
-### テストケース1: 長いタイトル
-
-```
-タイトル: これは非常に長いタイトルのテストです。タイトルが長い場合でも正しく表示されることを確認します...
-```
-
-### テストケース2: 特殊文字を含むタイトル
-
-```
-タイトル: テスト記事: "特殊文字" & <タグ> | パイプ
-```
-
-### テストケース3: 日本語と英語の混在
-
-```
-タイトル: ReadLater Test 記事 - Slack通知機能のテスト
-```
-
-## コマンドラインでのテスト
-
-Node.jsでSlack通知をテストすることもできます：
-
-```bash
-# node-fetchをインストール（必要な場合）
-npm install node-fetch
-
-# Webhook URLを環境変数に設定
-export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
-
-# テストを実行
-node tests/manual/slack-notification-test.js
-```
-
-## ログの見方
-
-### 成功時のログパターン
-
-```
-✅ 記事保存プロセス開始
-✅ 記事抽出成功
-✅ AI処理開始
-✅ Markdown生成
-✅ ファイル保存成功
-✅ Slack通知送信中...
-✅ Slack通知送信成功
-```
-
-### 失敗時のログパターン
-
-```
-✅ 記事保存プロセス開始
-✅ 記事抽出成功
-✅ AI処理開始
-✅ Markdown生成
-✅ ファイル保存成功
-❌ Slack通知送信失敗: Error: Slack API returned 404
-⚠️ Article saved successfully despite Slack notification failure
-```
-
-## まとめ
-
-- Slack通知は**個別保存モードでのみ**動作します
-- 通知の失敗は記事保存を妨げません
-- DevToolsのConsoleで詳細なログを確認できます
-- テストページを使用して簡単にテストできます
+詳細は `docs/slack-troubleshooting.md` を参照してください。
 
 ---
 
-**作成日**: 2025-10-14  
-**関連ファイル**:
-- `src/background/service-worker.js` - Slack通知実装
-- `src/options/options.html` - Slack設定UI
-- `src/options/options.js` - Slack設定処理
-- `tests/manual/slack-test.html` - テストページ
-- `tests/manual/slack-notification-test.js` - コマンドラインテスト
+### 4. 集約保存機能テスト
 
+複数記事を1つのファイルにまとめて保存する機能をテストします。
 
+#### テスト手順
+
+##### 4.1 設定
+
+1. オプションページを開く
+2. 以下を設定：
+   - ✅ **集約保存を有効にする** をチェック
+   - 📝 **集約ファイル名** を設定（デフォルト: `ReadLater_Articles.md`）
+   - 📝 **テーブル要約文字数制限** を設定（デフォルト: 100）
+3. 「設定を保存」をクリック
+
+##### 4.2 記事保存テスト
+
+1. 複数の記事を右クリックメニューから保存
+2. Obsidianフォルダ内の集約ファイルを確認
+3. テーブル形式で記事一覧が表示されることを確認
+
+#### 期待されるファイル形式
+
+```markdown
+# ReadLater Articles
+
+| タイトル | URL | 要約 | 日時 |
+|---------|-----|------|------|
+| 記事1 | URL1 | 要約1 | 2025-10-19 |
+| 記事2 | URL2 | 要約2 | 2025-10-19 |
+
+---
+*Generated by ReadLater for Obsidian*
+```
+
+詳細は `docs/aggregated-saving.md` を参照してください。
+
+---
+
+### 5. パフォーマンステスト
+
+言語検出機能のパフォーマンスを測定します。
+
+```bash
+node tests/manual/performance-test.js
+```
+
+#### 確認項目
+- 処理時間が許容範囲内か
+- メモリ使用量が適切か
+- エラーハンドリングが正しく機能するか
+
+---
+
+## 機能別テスト手順
+
+### 記事抽出機能
+
+1. 様々なWebサイトで記事保存を試行
+2. 以下が正しく抽出されることを確認：
+   - タイトル
+   - URL
+   - 本文
+   - 公開日（利用可能な場合）
+
+### AI要約機能
+
+1. 異なる言語の記事で要約を生成
+2. 要約スタイルを変更して確認：
+   - `structured`（構造化）
+   - `bullet`（箇条書き）
+   - `paragraph`（段落形式）
+3. 要約が適切な長さと内容であることを確認
+
+### ファイル保存機能
+
+#### 個別保存モード
+1. 記事を保存
+2. Obsidianフォルダに個別のMarkdownファイルが作成されることを確認
+3. ファイル名が `YYYY-MM-DD_HH-MM-SS_記事タイトル.md` 形式であることを確認
+
+#### 集約保存モード
+1. 複数記事を保存
+2. 集約ファイルに追記されることを確認
+3. テーブルが正しく更新されることを確認
+
+### エラーハンドリング
+
+以下のエラーケースをテスト：
+- ネットワークエラー
+- Claude CLI接続エラー
+- ファイル書き込みエラー
+- 不正なWebページ構造
+- Slack通知エラー
+
+各エラーで適切なメッセージが表示されることを確認。
+
+---
+
+## トラブルシューティング
+
+### テストが失敗する場合
+
+#### ユニットテスト
+```bash
+# キャッシュをクリアして再実行
+npm test -- --clearCache
+npm test
+```
+
+#### ネイティブホスト接続エラー
+1. Claude CLIがインストールされているか確認：
+   ```bash
+   claude --version
+   ```
+2. ネイティブホストが正しくインストールされているか確認：
+   ```bash
+   npm run install-native-host
+   ```
+3. 詳細は `docs/native-messaging.md` を参照
+
+#### Slack通知エラー
+1. Webhook URLが正しいか確認
+2. Slackワークスペースの権限を確認
+3. 詳細は `docs/slack-troubleshooting.md` を参照
+
+---
+
+## 継続的インテグレーション
+
+### ローカルでのビルドテスト
+
+```bash
+# リント + テストを実行
+npm run build
+```
+
+このコマンドは以下を実行します：
+1. ESLintによるコードチェック
+2. Jestによる全テスト実行
+
+---
+
+## 関連ドキュメント
+
+- [README.md](README.md) - プロジェクト概要
+- [docs/context.md](docs/context.md) - プロジェクトコンテキスト
+- [docs/native-messaging.md](docs/native-messaging.md) - ネイティブメッセージング設定
+- [docs/aggregated-saving.md](docs/aggregated-saving.md) - 集約保存機能
+- [docs/slack-troubleshooting.md](docs/slack-troubleshooting.md) - Slack通知トラブルシューティング
+- [tests/manual/README.md](tests/manual/README.md) - 手動テスト詳細
+
+---
+
+**更新日**: 2025-10-19  
+**作成者**: ReadLater for Obsidian チーム
