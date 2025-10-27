@@ -8,7 +8,6 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       if (tabs.length === 0) {
         await chrome.notifications.create({
           type: "basic",
-          iconUrl: "icons/icon128.png",
           title: "Atlas not found",
           message: "GPT Atlasタブを開いてから実行してください。"
         });
@@ -29,7 +28,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
         func: (prompt) => {
           const textarea = document.querySelector("textarea");
           if (!textarea) {
-            console.error("ChatGPT入力欄が見つかりません。");
+            console.error("ChatGPT入力案が見つかりません。");
             return;
           }
           textarea.value = prompt;
@@ -51,7 +50,6 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       console.error('Error in START_SUMMARY:', err);
       await chrome.notifications.create({
         type: "basic",
-        iconUrl: "icons/icon128.png",
         title: "Error",
         message: "要約実行中にエラーが発生しました。"
       });
@@ -66,7 +64,6 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       if (!webhook) {
         await chrome.notifications.create({
           type: "basic",
-          iconUrl: "icons/icon128.png",
           title: "Slack webhook未設定",
           message: "Slack webhook URLが設定されていません。"
         });
@@ -76,14 +73,13 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       const response = await fetch(webhook, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: `🧠 GPT Atlas要約:\n${text}` })
+        body: JSON.stringify({ text: ` GPT Atlas要約:\n${text}` })
       });
       if (!response.ok) {
         throw new Error(`Slack responded with status ${response.status}`);
       }
       await chrome.notifications.create({
         type: "basic",
-        iconUrl: "icons/icon128.png",
         title: "Slackに投稿完了",
         message: "要約をSlackに投稿しました。"
       });
@@ -91,7 +87,6 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       console.error('Error posting to Slack:', err);
       await chrome.notifications.create({
         type: "basic",
-        iconUrl: "icons/icon128.png",
         title: "Slack投稿エラー",
         message: "Slackへの投稿中にエラーが発生しました。"
       });
