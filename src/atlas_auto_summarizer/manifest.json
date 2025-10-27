@@ -3,17 +3,20 @@
   "name": "Atlas Auto Summarizer",
   "version": "1.1",
   "description": "Automatically summarize current page via GPT Atlas and post to Slack.",
-  "permissions": ["activeTab", "scripting", "tabs", "storage"],
+  "permissions": ["activeTab", "scripting", "tabs", "storage", "notifications"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_popup": "popup.html"
   },
+  "icons": {
+    "128": "icons/icon128.png"
+  },
   "host_permissions": [
     "https://chat.openai.com/*",
     "https://chatgpt.com/*",
-    "*://*/*"
+    "https://hooks.slack.com/*"
   ],
   "content_scripts": [
     {
