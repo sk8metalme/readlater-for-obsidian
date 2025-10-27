@@ -10,9 +10,6 @@
   "action": {
     "default_popup": "popup.html"
   },
-  "icons": {
-    "128": "icons/icon128.png"
-  },
   "host_permissions": [
     "https://chat.openai.com/*",
     "https://chatgpt.com/*",
