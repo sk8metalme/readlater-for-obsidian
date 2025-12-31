@@ -1,0 +1,38 @@
+name: Trigger Knowledge Collection
+
+# このワークフローは各リポジトリに配置し、PRマージ時にknowledge-repoへ通知します
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  notify-knowledge-repo:
+    # PRがマージされた場合のみ実行
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send repository dispatch to knowledge-repo
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          # knowledge-repoのリポジトリ情報を指定
+          token: ${{ secrets.ORG_GITHUB_TOKEN }}
+          repository: sk8metalme/review-dojo-knowledge
+          event-type: pr-merged
+          client-payload: |
+            {
+              "pr_url": "${{ github.event.pull_request.html_url }}",
+              "repo_owner": "${{ github.repository_owner }}",
+              "repo_name": "${{ github.event.repository.name }}",
+              "pr_number": "${{ github.event.pull_request.number }}",
+              "pr_title": "${{ github.event.pull_request.title }}",
+              "merged_by": "${{ github.event.pull_request.merged_by.login }}",
+              "merged_at": "${{ github.event.pull_request.merged_at }}"
+            }
+
+      - name: Log dispatch
+        run: |
+          echo "Dispatched knowledge collection for PR #${{ github.event.pull_request.number }}"
+          echo "PR: ${{ github.event.pull_request.html_url }}"
+          echo "Merged by: ${{ github.event.pull_request.merged_by.login }}"
